@@ -31,6 +31,7 @@ from text_normalize import normalize_text
 DEFAULT_LOCATION = "global"
 DEFAULT_CLEANUP_MODEL = "gemini-2.5-flash"
 DEFAULT_FUSION_MODEL = "gemini-2.5-flash"
+DEFAULT_TRANSLATE_MODEL = "gemini-2.5-flash"
 
 CLEANUP_SYSTEM_PROMPT = (
     "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt (người nói có thể chêm "
@@ -60,6 +61,15 @@ FUSION_SYSTEM_PROMPT = (
     "hiện ở bất kỳ bản nào, không suy diễn, không tóm tắt bớt nội dung, "
     "không dịch. Chỉ trả về đúng câu văn bản cuối cùng, không thêm giải "
     "thích."
+)
+
+TRANSLATE_SYSTEM_PROMPT = (
+    "Bạn là công cụ dịch thuật tiếng Việt sang tiếng Anh. Dịch chính xác câu "
+    "sau sang tiếng Anh tự nhiên, giữ nguyên văn phong nói (spoken-style), "
+    "giữ nguyên ý nghĩa và mọi chi tiết trong câu gốc. TUYỆT ĐỐI không thêm "
+    "thông tin, không bỏ sót nội dung, không diễn giải, không thêm giải "
+    "thích. Chỉ trả về đúng câu dịch tiếng Anh, không thêm dấu ngoặc kép, "
+    "không thêm tiền tố."
 )
 
 
@@ -239,6 +249,69 @@ def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict)
             best_reference=best_name,
             accepted=accepted,
             final_text=llm_text if accepted else rover_text,
+        )
+    except Exception as e:
+        result["error"] = repr(e)
+
+    return result
+
+
+# --------------------------------------------------------------------------
+# Translation (VI -> EN) of the final ASR text
+# --------------------------------------------------------------------------
+
+def is_reasonable_translation_length(
+    source_text: str,
+    target_text: str,
+    *,
+    min_word_ratio: float = 0.3,
+    max_word_ratio: float = 3.0,
+) -> bool:
+    """Loose sanity check for a translation.
+
+    Similarity-based diffing (used for cleanup/fusion) doesn't apply across
+    languages, so this only catches the failure modes that are still
+    detectable without understanding English: an empty/near-empty
+    translation (truncation, refusal) or a wildly longer one (rambling,
+    repeated/hallucinated content).
+    """
+    if not target_text or not target_text.strip():
+        return False
+    src_words = len((source_text or "").split())
+    tgt_words = len(target_text.split())
+    if src_words == 0:
+        return True
+    ratio = tgt_words / src_words
+    return min_word_ratio <= ratio <= max_word_ratio
+
+
+def translate_text(client, model: str, source_text: str) -> dict:
+    """Translate the final Vietnamese ASR text to English.
+
+    Unlike clean_transcript/fuse_transcripts, there is no sensible
+    pre-LLM fallback here (the source is Vietnamese, not English) -- if the
+    translation is rejected or the call errors, final_text stays None
+    rather than silently returning something wrong.
+    """
+    result = {
+        "source_text": source_text,
+        "llm_text": None,
+        "final_text": None,
+        "accepted": False,
+        "error": None,
+    }
+    if not source_text or not source_text.strip():
+        result["accepted"] = True
+        result["final_text"] = ""
+        return result
+
+    try:
+        llm_text = _call_gemini(client, model, TRANSLATE_SYSTEM_PROMPT, source_text)
+        accepted = is_reasonable_translation_length(source_text, llm_text)
+        result.update(
+            llm_text=llm_text,
+            accepted=accepted,
+            final_text=llm_text if accepted else None,
         )
     except Exception as e:
         result["error"] = repr(e)

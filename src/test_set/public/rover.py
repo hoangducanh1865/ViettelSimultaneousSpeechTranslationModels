@@ -347,6 +347,38 @@ def get_or_fuse(
     return result
 
 
+def llm_translate_cache_path(dataset_root: Path, wav_path: Path) -> Path:
+    relpath = wav_path.relative_to(dataset_root)
+    return dataset_root / CACHE_DIRNAME / "llm_translate" / relpath.with_suffix(".json")
+
+
+def get_or_translate(
+    llm_client,
+    model: str,
+    dataset_root: Path,
+    wav_path: Path,
+    source_text: str,
+    *,
+    force: bool,
+    stats: dict,
+) -> dict:
+    """Cache-or-call for the final VI -> EN translation step."""
+    cache_path = llm_translate_cache_path(dataset_root, wav_path)
+
+    if not force:
+        cached = _load_cached_json(cache_path)
+        if cached is not None:
+            stats["llm_translate_cache_hits"] += 1
+            return cached
+
+    result = llm_refine.translate_text(llm_client, model, source_text)
+    stats["llm_translate_calls"] += 1
+    if not result.get("accepted", False):
+        stats["llm_translate_rejected"] += 1
+    _atomic_write_json(cache_path, result)
+    return result
+
+
 def combine_for_file(
     dataset_root: Path,
     wav_path: Path,
@@ -419,6 +451,16 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--llm-cleanup-model", default=llm_refine.DEFAULT_CLEANUP_MODEL)
     parser.add_argument("--llm-fusion-model", default=llm_refine.DEFAULT_FUSION_MODEL)
+    parser.add_argument(
+        "--translate",
+        action="store_true",
+        help=(
+            "Translate the final ASR text (post llm-refine if enabled, else the raw ROVER text) "
+            "to English via Gemini. Requires GEMINI_SERVICE_ACCOUNT_JSON/GEMINI_PROJECT_ID env vars "
+            "(same as --llm-refine, and implies creating that client even without --llm-refine)."
+        ),
+    )
+    parser.add_argument("--llm-translate-model", default=llm_refine.DEFAULT_TRANSLATE_MODEL)
     return parser.parse_args(argv)
 
 
@@ -442,6 +484,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"Models       : {', '.join(c.name for c in clients)}")
     print(f"Audio files  : {len(wav_files)}")
     print(f"LLM refine   : {'on (' + args.llm_cleanup_model + ' / ' + args.llm_fusion_model + ')' if args.llm_refine else 'off'}")
+    print(f"Translate    : {'on (' + args.llm_translate_model + ')' if args.translate else 'off'}")
 
     stats = {"cache_hits": {}, "fresh_calls": {}, "errors_by_model": {}}
     llm_client = None
@@ -454,6 +497,13 @@ def main(argv: Optional[list[str]] = None) -> None:
             llm_fusion_calls=0,
             llm_fusion_rejected=0,
         )
+    if args.translate:
+        stats.update(
+            llm_translate_cache_hits=0,
+            llm_translate_calls=0,
+            llm_translate_rejected=0,
+        )
+    if args.llm_refine or args.translate:
         llm_client = llm_refine.create_client()
 
     output_dir = dataset_root / CACHE_DIRNAME / ROVER_OUTPUT_SUBDIR
@@ -496,10 +546,21 @@ def main(argv: Optional[list[str]] = None) -> None:
                 "final_text": final_text,
             }
 
+        translation = None
+        if args.translate and llm_client is not None and final_text:
+            translation = get_or_translate(
+                llm_client, args.llm_translate_model, dataset_root, wav_path, final_text,
+                force=args.force, stats=stats,
+            )
+            combined["translation"] = translation
+
         out_path = (output_dir / relpath).with_suffix(".json")
         _atomic_write_json(out_path, combined)
 
-        print(f"[{relpath}] -> {final_text!r}")
+        line = f"[{relpath}] -> {final_text!r}"
+        if translation is not None:
+            line += f"  EN: {translation['final_text']!r}"
+        print(line)
 
     run_summary = {
         "schema_version": 1,
@@ -510,6 +571,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         "fresh_calls": stats["fresh_calls"],
         "errors_by_model": stats["errors_by_model"],
         "llm_refine": args.llm_refine,
+        "translate": args.translate,
         "run_at": datetime.now(timezone.utc).isoformat(),
     }
     if args.llm_refine:
@@ -520,6 +582,12 @@ def main(argv: Optional[list[str]] = None) -> None:
             llm_fusion_cache_hits=stats["llm_fusion_cache_hits"],
             llm_fusion_calls=stats["llm_fusion_calls"],
             llm_fusion_rejected=stats["llm_fusion_rejected"],
+        )
+    if args.translate:
+        run_summary.update(
+            llm_translate_cache_hits=stats["llm_translate_cache_hits"],
+            llm_translate_calls=stats["llm_translate_calls"],
+            llm_translate_rejected=stats["llm_translate_rejected"],
         )
     _atomic_write_json(dataset_root / CACHE_DIRNAME / "run_summary.json", run_summary)
     print("\nRun summary:")
