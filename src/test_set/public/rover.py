@@ -21,6 +21,8 @@ import argparse
 import json
 import os
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +54,9 @@ MODEL_WEIGHT_MULTIPLIER = {
 CACHE_DIRNAME = "rover_cache"
 ROVER_OUTPUT_SUBDIR = "rover_output"
 AUDIO_EXTENSIONS = (".wav",)
+
+DEFAULT_MAX_WORKERS = 5  # concurrent files in flight
+PHOWHISPER_BATCH_SIZE = 8  # files per generate() call in the batch pre-pass
 
 ALL_CLIENT_BUILDERS = {
     "internal_whisper": lambda: InternalWhisperClient(),
@@ -242,6 +247,17 @@ def save_result(cache_path: Path, audio_relpath: str, result: TranscriptionResul
     _atomic_write_json(cache_path, result.to_json_dict(audio_relpath))
 
 
+def _incr(stats: dict, lock: threading.Lock, key: str, subkey: Optional[str] = None) -> None:
+    """Thread-safe += 1 on a stats counter (plain dict mutation isn't safe
+    to share across worker threads -- a compound read-modify-write can
+    lose updates under concurrency)."""
+    with lock:
+        if subkey is None:
+            stats[key] = stats.get(key, 0) + 1
+        else:
+            stats[key][subkey] = stats[key].get(subkey, 0) + 1
+
+
 def get_or_call(
     client: BaseASRClient,
     dataset_root: Path,
@@ -250,6 +266,7 @@ def get_or_call(
     language: Optional[str],
     force: bool,
     stats: dict,
+    lock: threading.Lock,
 ) -> TranscriptionResult:
     """Cache-or-call: skip the model if cached output already exists,
     otherwise call it and persist the result."""
@@ -258,13 +275,13 @@ def get_or_call(
     if not force:
         cached = load_cached_result(cache_path)
         if cached is not None:
-            stats["cache_hits"][client.name] = stats["cache_hits"].get(client.name, 0) + 1
+            _incr(stats, lock, "cache_hits", client.name)
             return cached
 
     result = client.transcribe(wav_path, language=language)
-    stats["fresh_calls"][client.name] = stats["fresh_calls"].get(client.name, 0) + 1
+    _incr(stats, lock, "fresh_calls", client.name)
     if result.error is not None:
-        stats["errors_by_model"][client.name] = stats["errors_by_model"].get(client.name, 0) + 1
+        _incr(stats, lock, "errors_by_model", client.name)
 
     relpath = str(wav_path.relative_to(dataset_root))
     save_result(cache_path, relpath, result)
@@ -301,6 +318,7 @@ def get_or_clean(
     *,
     force: bool,
     stats: dict,
+    lock: threading.Lock,
 ) -> dict:
     """Cache-or-call for the per-voter LLM cleanup step."""
     cache_path = llm_clean_cache_path(dataset_root, model_name, wav_path)
@@ -308,13 +326,13 @@ def get_or_clean(
     if not force:
         cached = _load_cached_json(cache_path)
         if cached is not None:
-            stats["llm_clean_cache_hits"][model_name] = stats["llm_clean_cache_hits"].get(model_name, 0) + 1
+            _incr(stats, lock, "llm_clean_cache_hits", model_name)
             return cached
 
     result = llm_refine.clean_transcript(llm_client, model, raw_text)
-    stats["llm_clean_calls"][model_name] = stats["llm_clean_calls"].get(model_name, 0) + 1
+    _incr(stats, lock, "llm_clean_calls", model_name)
     if not result.get("accepted", False):
-        stats["llm_clean_rejected"][model_name] = stats["llm_clean_rejected"].get(model_name, 0) + 1
+        _incr(stats, lock, "llm_clean_rejected", model_name)
     _atomic_write_json(cache_path, result)
     return result
 
@@ -329,6 +347,7 @@ def get_or_fuse(
     *,
     force: bool,
     stats: dict,
+    lock: threading.Lock,
 ) -> dict:
     """Cache-or-call for the final fusion LLM step."""
     cache_path = llm_fusion_cache_path(dataset_root, wav_path)
@@ -336,13 +355,13 @@ def get_or_fuse(
     if not force:
         cached = _load_cached_json(cache_path)
         if cached is not None:
-            stats["llm_fusion_cache_hits"] += 1
+            _incr(stats, lock, "llm_fusion_cache_hits")
             return cached
 
     result = llm_refine.fuse_transcripts(llm_client, model, rover_text, per_model_texts)
-    stats["llm_fusion_calls"] += 1
+    _incr(stats, lock, "llm_fusion_calls")
     if not result.get("accepted", False):
-        stats["llm_fusion_rejected"] += 1
+        _incr(stats, lock, "llm_fusion_rejected")
     _atomic_write_json(cache_path, result)
     return result
 
@@ -361,6 +380,7 @@ def get_or_translate(
     *,
     force: bool,
     stats: dict,
+    lock: threading.Lock,
 ) -> dict:
     """Cache-or-call for the final VI -> EN translation step."""
     cache_path = llm_translate_cache_path(dataset_root, wav_path)
@@ -368,15 +388,64 @@ def get_or_translate(
     if not force:
         cached = _load_cached_json(cache_path)
         if cached is not None:
-            stats["llm_translate_cache_hits"] += 1
+            _incr(stats, lock, "llm_translate_cache_hits")
             return cached
 
     result = llm_refine.translate_text(llm_client, model, source_text)
-    stats["llm_translate_calls"] += 1
+    _incr(stats, lock, "llm_translate_calls")
     if not result.get("accepted", False):
-        stats["llm_translate_rejected"] += 1
+        _incr(stats, lock, "llm_translate_rejected")
     _atomic_write_json(cache_path, result)
     return result
+
+
+def run_phowhisper_batch_prepass(
+    client: BaseASRClient,
+    dataset_root: Path,
+    wav_files: list[Path],
+    *,
+    language: str,
+    force: bool,
+    batch_size: int,
+    stats: dict,
+    lock: threading.Lock,
+) -> None:
+    """Batch PhoWhisper inference (one generate() call per chunk instead of
+    one per file -- much better GPU utilization) for every file that isn't
+    already cached, writing results into the normal per-file cache so the
+    rest of the pipeline (get_or_call) just sees a cache hit and doesn't
+    need to know batching happened.
+
+    Runs before the per-file concurrent stage below, since a single GPU
+    doesn't benefit from being hit by several threads at once the way the
+    network-bound ASR/LLM calls do.
+    """
+    pending = [
+        p for p in wav_files
+        if force or load_cached_result(cache_path_for(dataset_root, client.name, p)) is None
+    ]
+    if not pending:
+        return
+
+    print(f"PhoWhisper: batching {len(pending)} file(s), {batch_size} per generate() call...")
+    for start in range(0, len(pending), batch_size):
+        chunk = pending[start : start + batch_size]
+        try:
+            results = client.transcribe_batch(chunk, language=language)
+        except Exception as e:
+            # Batching failed for some reason (OOM, an unexpected shape, a
+            # transformers version quirk) -- fall back to the slower but
+            # well-tested per-file path for this chunk rather than losing
+            # this voter for it.
+            print(f"  batch of {len(chunk)} failed ({e!r}), falling back to per-file for this chunk")
+            results = [client.transcribe(p, language=language) for p in chunk]
+
+        for wav_path, result in zip(chunk, results):
+            _incr(stats, lock, "fresh_calls", client.name)
+            if result.error is not None:
+                _incr(stats, lock, "errors_by_model", client.name)
+            relpath = str(wav_path.relative_to(dataset_root))
+            save_result(cache_path_for(dataset_root, client.name, wav_path), relpath, result)
 
 
 def combine_for_file(
@@ -461,7 +530,111 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--llm-translate-model", default=llm_refine.DEFAULT_TRANSLATE_MODEL)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=DEFAULT_MAX_WORKERS,
+        help=f"Max files processed concurrently (default: {DEFAULT_MAX_WORKERS}). "
+        "Each file's own ASR/cleanup calls are additionally parallelized internally.",
+    )
+    parser.add_argument(
+        "--phowhisper-batch-size",
+        type=int,
+        default=PHOWHISPER_BATCH_SIZE,
+        help=f"Files per PhoWhisper generate() call in the batch pre-pass (default: {PHOWHISPER_BATCH_SIZE}). "
+        "Lower this if you hit GPU OOM.",
+    )
     return parser.parse_args(argv)
+
+
+def process_one_file(
+    wav_path: Path,
+    dataset_root: Path,
+    clients: list[BaseASRClient],
+    args: argparse.Namespace,
+    llm_client,
+    stats: dict,
+    lock: threading.Lock,
+    output_dir: Path,
+) -> str:
+    """Run the full per-file pipeline (ASR -> combine -> LLM refine ->
+    translate) and write its output. Independent across files -- the
+    caller runs this concurrently for the whole batch.
+
+    ASR calls for different models are independent HTTP/gRPC requests, so
+    they're fired off concurrently here too (PhoWhisper is excluded: it's
+    handled by the batch pre-pass in main() before this function ever
+    runs, so get_or_call for it below is always a cache hit, not a real
+    network/GPU call). Same idea for the per-voter cleanup calls.
+    """
+    # Built by iterating `clients`/`cleanable` in a fixed order and only
+    # then calling .result() on each future (which blocks until that
+    # specific one is done) -- NOT by insertion-on-completion (as_completed
+    # would make dict order depend on network timing). ROVER's tie-breaking
+    # for equal-weight voters relies on a stable, reproducible fold order
+    # (see build_word_transition_network's sorted(..., key=weight) being a
+    # *stable* sort), so this must not vary run-to-run.
+    relpath = wav_path.relative_to(dataset_root)
+    with ThreadPoolExecutor(max_workers=max(1, len(clients))) as pool:
+        futures = [
+            (client.name, pool.submit(
+                get_or_call, client, dataset_root, wav_path,
+                language=args.language, force=args.force, stats=stats, lock=lock,
+            ))
+            for client in clients
+        ]
+        per_model: dict[str, TranscriptionResult] = {name: fut.result() for name, fut in futures}
+
+    combined = combine_for_file(dataset_root, wav_path, per_model)
+    final_text = combined["rover_text"]
+
+    if args.llm_refine and llm_client is not None:
+        cleanable = [(name, r) for name, r in per_model.items() if r.error is None and r.text]
+        clean_results = {}
+        per_model_clean_texts = {}
+        if cleanable:
+            with ThreadPoolExecutor(max_workers=len(cleanable)) as pool:
+                futures = [
+                    (model_name, pool.submit(
+                        get_or_clean, llm_client, args.llm_cleanup_model, model_name,
+                        dataset_root, wav_path, result.text, force=args.force, stats=stats, lock=lock,
+                    ))
+                    for model_name, result in cleanable
+                ]
+                for model_name, future in futures:
+                    clean = future.result()
+                    clean_results[model_name] = clean
+                    per_model_clean_texts[model_name] = clean["final_text"]
+
+        fusion = None
+        if combined["rover_text"]:
+            fusion = get_or_fuse(
+                llm_client, args.llm_fusion_model, dataset_root, wav_path,
+                combined["rover_text"], per_model_clean_texts, force=args.force, stats=stats, lock=lock,
+            )
+            final_text = fusion["final_text"]
+
+        combined["llm_refine"] = {
+            "per_model_clean": clean_results,
+            "fusion": fusion,
+            "final_text": final_text,
+        }
+
+    translation = None
+    if args.translate and llm_client is not None and final_text:
+        translation = get_or_translate(
+            llm_client, args.llm_translate_model, dataset_root, wav_path, final_text,
+            force=args.force, stats=stats, lock=lock,
+        )
+        combined["translation"] = translation
+
+    out_path = (output_dir / relpath).with_suffix(".json")
+    _atomic_write_json(out_path, combined)
+
+    line = f"[{relpath}] -> {final_text!r}"
+    if translation is not None:
+        line += f"  EN: {translation['final_text']!r}"
+    return line
 
 
 def main(argv: Optional[list[str]] = None) -> None:
@@ -485,8 +658,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"Audio files  : {len(wav_files)}")
     print(f"LLM refine   : {'on (' + args.llm_cleanup_model + ' / ' + args.llm_fusion_model + ')' if args.llm_refine else 'off'}")
     print(f"Translate    : {'on (' + args.llm_translate_model + ')' if args.translate else 'off'}")
+    print(f"Max workers  : {args.max_workers} files concurrently")
 
     stats = {"cache_hits": {}, "fresh_calls": {}, "errors_by_model": {}}
+    lock = threading.Lock()
     llm_client = None
     if args.llm_refine:
         stats.update(
@@ -508,59 +683,31 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     output_dir = dataset_root / CACHE_DIRNAME / ROVER_OUTPUT_SUBDIR
 
-    for wav_path in wav_files:
-        relpath = wav_path.relative_to(dataset_root)
-        per_model: dict[str, TranscriptionResult] = {}
-        for client in clients:
-            per_model[client.name] = get_or_call(
-                client, dataset_root, wav_path, language=args.language, force=args.force, stats=stats
-            )
+    # PhoWhisper is local GPU inference -- batch it across files in one
+    # pre-pass (better GPU utilization than one generate() call per file)
+    # instead of folding it into the concurrent-per-file stage below,
+    # where several threads hitting one GPU wouldn't help and would just
+    # add complexity for no gain.
+    phowhisper_client = next((c for c in clients if c.name == "phowhisper"), None)
+    network_clients = [c for c in clients if c.name != "phowhisper"]
+    if phowhisper_client is not None:
+        run_phowhisper_batch_prepass(
+            phowhisper_client, dataset_root, wav_files,
+            language=args.language, force=args.force, batch_size=args.phowhisper_batch_size,
+            stats=stats, lock=lock,
+        )
 
-        combined = combine_for_file(dataset_root, wav_path, per_model)
-        final_text = combined["rover_text"]
-
-        if args.llm_refine and llm_client is not None:
-            clean_results = {}
-            per_model_clean_texts = {}
-            for model_name, result in per_model.items():
-                if result.error is not None or not result.text:
-                    continue
-                clean = get_or_clean(
-                    llm_client, args.llm_cleanup_model, model_name, dataset_root, wav_path, result.text,
-                    force=args.force, stats=stats,
-                )
-                clean_results[model_name] = clean
-                per_model_clean_texts[model_name] = clean["final_text"]
-
-            fusion = None
-            if combined["rover_text"]:
-                fusion = get_or_fuse(
-                    llm_client, args.llm_fusion_model, dataset_root, wav_path,
-                    combined["rover_text"], per_model_clean_texts, force=args.force, stats=stats,
-                )
-                final_text = fusion["final_text"]
-
-            combined["llm_refine"] = {
-                "per_model_clean": clean_results,
-                "fusion": fusion,
-                "final_text": final_text,
-            }
-
-        translation = None
-        if args.translate and llm_client is not None and final_text:
-            translation = get_or_translate(
-                llm_client, args.llm_translate_model, dataset_root, wav_path, final_text,
-                force=args.force, stats=stats,
-            )
-            combined["translation"] = translation
-
-        out_path = (output_dir / relpath).with_suffix(".json")
-        _atomic_write_json(out_path, combined)
-
-        line = f"[{relpath}] -> {final_text!r}"
-        if translation is not None:
-            line += f"  EN: {translation['final_text']!r}"
-        print(line)
+    with ThreadPoolExecutor(max_workers=min(args.max_workers, len(wav_files))) as pool:
+        futures = {
+            pool.submit(
+                process_one_file, wav_path, dataset_root, network_clients + (
+                    [phowhisper_client] if phowhisper_client is not None else []
+                ), args, llm_client, stats, lock, output_dir,
+            ): wav_path
+            for wav_path in wav_files
+        }
+        for future in as_completed(futures):
+            print(future.result())
 
     run_summary = {
         "schema_version": 1,

@@ -133,3 +133,72 @@ class PhoWhisperClient(BaseASRClient):
                 error=repr(e),
                 called_at=datetime.now(timezone.utc).isoformat(),
             )
+
+    def transcribe_batch(self, wav_paths: list[Path], *, language: Optional[str] = None) -> list[TranscriptionResult]:
+        """Transcribe several files in a single generate() call.
+
+        Whisper's feature extractor always produces a fixed-length (30s
+        window) mel-spectrogram per file regardless of actual audio
+        duration, so stacking several files into one batch needs no
+        ragged-padding logic on the input side. Much better GPU
+        utilization than looping transcribe() one file at a time.
+
+        Raises on failure (unlike transcribe()) -- callers should catch
+        and fall back to per-file transcribe() for that chunk rather than
+        silently mis-attributing a batch-alignment bug to "no error".
+        """
+        import torch
+
+        model, processor = self._ensure_model()
+        audios = [self._load_audio_16k(p) for p in wav_paths]
+
+        inputs = processor(audios, sampling_rate=16000, return_tensors="pt")
+        input_features = inputs.input_features.to(self._device)
+
+        start = time.perf_counter()
+        with torch.no_grad():
+            generated = model.generate(
+                input_features,
+                language=language or "vi",
+                task="transcribe",
+                output_scores=True,
+                return_dict_in_generate=True,
+            )
+        latency = time.perf_counter() - start
+        per_item_latency = latency / len(wav_paths)
+
+        texts = processor.batch_decode(generated.sequences, skip_special_tokens=True)
+
+        eos_id = processor.tokenizer.eos_token_id
+        n_steps = len(generated.scores)
+        total_len = generated.sequences.shape[1]
+        generated_ids = generated.sequences[:, total_len - n_steps:]  # drop the forced prefix
+
+        called_at = datetime.now(timezone.utc).isoformat()
+        results = []
+        for i in range(len(wav_paths)):
+            # Batched generation runs every sample for the same number of
+            # steps (padding shorter ones after their EOS) -- stop
+            # accumulating log-prob right after this sample's own EOS so
+            # padding doesn't dilute its confidence.
+            log_probs = []
+            for step in range(n_steps):
+                token_id = generated_ids[i, step].item()
+                step_logits = generated.scores[step][i]
+                log_probs.append(torch.log_softmax(step_logits, dim=-1)[token_id].item())
+                if token_id == eos_id:
+                    break
+            confidence = float(math.exp(sum(log_probs) / len(log_probs))) if log_probs else None
+
+            results.append(TranscriptionResult(
+                model_name=self.name,
+                text=texts[i].strip(),
+                confidence=confidence,
+                detected_language=language or "vi",
+                latency_sec=per_item_latency,
+                error=None,
+                called_at=called_at,
+                extra={"model_id": self.model_id, "batched": True, "batch_size": len(wav_paths)},
+            ))
+
+        return results
