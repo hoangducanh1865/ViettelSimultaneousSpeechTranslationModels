@@ -22,12 +22,12 @@ ngôi thứ 3** — khiến bước dịch sau đó hiểu nhầm thành ngôi t
 
 ## Quy tắc áp dụng
 
-- **Không bao giờ** "sửa" các từ rút gọn này về lại danh xưng gốc — đó không phải
-  lỗi chính tả, đó là ngữ pháp khẩu ngữ hợp lệ.
-- Khi làm sạch (cleanup) văn bản ASR: có thể viết lại tường minh thành
-  "danh xưng + ấy" (ví dụ "chỉ" → "chị ấy") để rõ nghĩa hơn cho các bước xử lý
-  sau, nhưng **phải giữ đúng nghĩa ngôi thứ 3**, tuyệt đối không được đổi thành
-  danh xưng trần (ngôi thứ 2).
+- **Không bao giờ** "sửa" các từ rút gọn này về lại danh xưng gốc hay bất kỳ dạng
+  nào khác — kể cả khi làm sạch (cleanup) văn bản ASR. Giữ nguyên y hệt ("chỉ" ở
+  văn bản tiếng Việt vẫn phải là "chỉ"). Đó không phải lỗi chính tả, đó là ngữ
+  pháp khẩu ngữ hợp lệ, và ý nghĩa ngôi thứ 3 phải được **suy luận đúng ở bước
+  dịch** dựa trên bảng tra cứu này + ngữ cảnh câu, không phải bằng cách viết lại
+  văn bản gốc.
 - Khi dịch sang tiếng Anh: các từ rút gọn này luôn dịch là "she/her" hoặc
   "he/him" (ngôi thứ 3), **không bao giờ** dịch là "you".
 - Phân biệt với danh xưng trần (không mang nghĩa "ấy" ẩn): "chị", "anh", "ông",

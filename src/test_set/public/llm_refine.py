@@ -70,11 +70,15 @@ CLEANUP_SYSTEM_PROMPT = _with_context(
     "tiếng Anh (ví dụ: 'phây búc' -> 'Facebook', 'bưu' khi rõ ràng người nói "
     "đang nói 'boost' -> 'boost'); bỏ các từ/âm lặp do lỗi nhận dạng giọng "
     "nói gây ra, không phải do người nói lặp thật (ví dụ 'mấy mấy mấy' -> "
-    "'mấy'). Giữ nguyên văn phong nói tự nhiên (spoken-style) và toàn bộ ý "
-    "nghĩa, nội dung câu nói. TUYỆT ĐỐI không thêm thông tin mới, không diễn "
-    "giải lại câu, không tóm tắt bớt nội dung, không dịch sang ngôn ngữ "
-    "khác. Chỉ trả về đúng văn bản đã sửa, không thêm giải thích, không "
-    "thêm dấu ngoặc kép, không thêm tiền tố."
+    "'mấy'). Các đại từ nhân xưng rút gọn ngôi thứ 3 kiểu Nam Bộ (chỉ, ảnh, "
+    "ổng, bả, cổ, chả -- xem bảng chi tiết bên dưới) là ngữ pháp khẩu ngữ hợp "
+    "lệ, KHÔNG PHẢI lỗi ASR -- giữ nguyên y hệt, không viết lại, không đổi "
+    "thành danh xưng gốc hay bất kỳ dạng nào khác. Giữ nguyên văn phong nói "
+    "tự nhiên (spoken-style) và toàn bộ ý nghĩa, nội dung câu nói. TUYỆT ĐỐI "
+    "không thêm thông tin mới, không diễn giải lại câu, không tóm tắt bớt "
+    "nội dung, không dịch sang ngôn ngữ khác. Chỉ trả về đúng văn bản đã "
+    "sửa, không thêm giải thích, không thêm dấu ngoặc kép, không thêm tiền "
+    "tố."
 )
 
 FUSION_SYSTEM_PROMPT = _with_context(
@@ -175,27 +179,46 @@ def create_client():
     return genai.Client(vertexai=True, project=project_id, location=location, credentials=credentials)
 
 
-def _thinking_config(model: str):
+def _thinking_config(model: str, minimal: bool):
     """Thinking tokens are drawn from the same max_output_tokens budget as
-    the visible answer -- on longer inputs that silently truncated the
-    actual cleaned/fused/translated text mid-sentence (caught by the diff
-    guard as an unsafe edit, but the real bug was excess thinking eating
-    the budget). These are plain cleanup/fusion/translation tasks, no deep
-    reasoning needed, so keep thinking minimal.
+    the visible answer -- on longer inputs that let thinking run wild
+    silently truncated the actual cleaned/fused/translated text
+    mid-sentence (caught by the diff guard as an unsafe edit, but the real
+    bug was excess thinking eating the budget).
+
+    Cleanup/fusion are mechanical (fix spelling, pick a word) -> minimal
+    thinking is fine and faster/cheaper. Translation, specifically
+    resolving whether a contracted pronoun like "chỉ" means "you" or
+    "she", genuinely benefits from reasoning about context -- forcing it
+    to minimal made the model guess instead of reason, and it guessed
+    wrong. So translate calls pass minimal=False to keep the model's
+    default (higher) thinking level.
 
     Gemini 2.5.x controls this via `thinking_budget` (token count, 0 =
-    off). Gemini 3.x replaced that with `thinking_level` ("LOW"/"MEDIUM"/
-    "HIGH", no off-switch) -- passing the wrong field name for a given
-    model family raises, so branch on the model string.
+    off, unset = model default/dynamic). Gemini 3.x replaced that with
+    `thinking_level` ("LOW"/"MEDIUM"/"HIGH", default HIGH if unset) --
+    passing the wrong field name for a given model family raises, so
+    branch on the model string.
     """
     from google.genai import types
+
+    if not minimal:
+        return None  # let the model use its own default thinking level
 
     if model.startswith("gemini-3"):
         return types.ThinkingConfig(thinking_level="LOW")
     return types.ThinkingConfig(thinking_budget=0)
 
 
-def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> str:
+def _call_gemini(
+    client,
+    model: str,
+    system_prompt: str,
+    user_content: str,
+    *,
+    minimal_thinking: bool = True,
+    max_output_tokens: int = 2048,
+) -> str:
     from google.genai import types
 
     response = client.models.generate_content(
@@ -204,8 +227,8 @@ def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=0.1,
-            max_output_tokens=2048,
-            thinking_config=_thinking_config(model),
+            max_output_tokens=max_output_tokens,
+            thinking_config=_thinking_config(model, minimal_thinking),
         ),
     )
     return (response.text or "").strip()
@@ -354,7 +377,10 @@ def translate_text(client, model: str, source_text: str) -> dict:
         return result
 
     try:
-        llm_text = _call_gemini(client, model, TRANSLATE_SYSTEM_PROMPT, source_text)
+        llm_text = _call_gemini(
+            client, model, TRANSLATE_SYSTEM_PROMPT, source_text,
+            minimal_thinking=False, max_output_tokens=4096,
+        )
         accepted = is_reasonable_translation_length(source_text, llm_text)
         result.update(
             llm_text=llm_text,
