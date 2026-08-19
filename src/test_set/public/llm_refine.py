@@ -33,23 +33,33 @@ DEFAULT_CLEANUP_MODEL = "gemini-2.5-flash"
 DEFAULT_FUSION_MODEL = "gemini-2.5-flash"
 
 CLEANUP_SYSTEM_PROMPT = (
-    "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt. Nhiệm vụ: chỉ sửa lỗi "
-    "chính tả nhỏ, dấu câu, khoảng trắng, và bỏ các từ/âm lặp do lỗi nhận "
-    "dạng giọng nói gây ra (không phải do người nói lặp thật). Giữ nguyên "
-    "văn phong nói tự nhiên (spoken-style), giữ nguyên ý nghĩa và độ dài "
-    "nội dung. TUYỆT ĐỐI không thêm, không bớt, không diễn giải lại, không "
-    "dịch sang ngôn ngữ khác. Chỉ trả về đúng văn bản đã làm sạch, không "
-    "thêm giải thích, không thêm dấu ngoặc kép, không thêm tiền tố."
+    "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt (người nói có thể chêm "
+    "từ/tên riêng tiếng Anh - code-switching). Nhiệm vụ: sửa lỗi chính tả, "
+    "dấu câu, khoảng trắng; sửa các từ/tên riêng tiếng Anh bị nhận dạng sai "
+    "thành cách viết phiên âm theo phát âm tiếng Việt về đúng chính tả gốc "
+    "tiếng Anh (ví dụ: 'phây búc' -> 'Facebook', 'bưu' khi rõ ràng người nói "
+    "đang nói 'boost' -> 'boost'); bỏ các từ/âm lặp do lỗi nhận dạng giọng "
+    "nói gây ra, không phải do người nói lặp thật (ví dụ 'mấy mấy mấy' -> "
+    "'mấy'). Giữ nguyên văn phong nói tự nhiên (spoken-style) và toàn bộ ý "
+    "nghĩa, nội dung câu nói. TUYỆT ĐỐI không thêm thông tin mới, không diễn "
+    "giải lại câu, không tóm tắt bớt nội dung, không dịch sang ngôn ngữ "
+    "khác. Chỉ trả về đúng văn bản đã sửa, không thêm giải thích, không "
+    "thêm dấu ngoặc kép, không thêm tiền tố."
 )
 
 FUSION_SYSTEM_PROMPT = (
     "Bạn nhận được kết quả ASR từ nhiều hệ thống khác nhau cho cùng một đoạn "
-    "audio, cùng một bản đã hợp nhất bằng thuật toán ROVER (vote theo từng "
-    "từ, dựa trên confidence của từng hệ thống). Hãy tổng hợp lại thành một "
-    "câu chính xác nhất, ưu tiên nội dung xuất hiện ở đa số các bản, giữ "
-    "văn phong nói tự nhiên. TUYỆT ĐỐI không thêm thông tin không xuất hiện "
-    "ở bất kỳ bản nào, không suy diễn, không dịch. Chỉ trả về đúng câu văn "
-    "bản cuối cùng, không thêm giải thích."
+    "audio tiếng Việt (có thể chêm từ/tên riêng tiếng Anh - code-switching), "
+    "cùng một bản đã hợp nhất bằng thuật toán ROVER (vote theo từng từ, dựa "
+    "trên confidence của từng hệ thống). Hãy tổng hợp lại thành một câu "
+    "chính xác nhất: ưu tiên nội dung xuất hiện ở đa số các bản; nếu các bản "
+    "chỉ khác nhau ở cách viết một từ/tên riêng tiếng Anh (một bản viết đúng "
+    "chính tả gốc tiếng Anh, các bản khác phiên âm theo phát âm tiếng Việt), "
+    "hãy dùng đúng chính tả gốc tiếng Anh cho từ đó dù bản đó là thiểu số; "
+    "giữ văn phong nói tự nhiên. TUYỆT ĐỐI không thêm thông tin không xuất "
+    "hiện ở bất kỳ bản nào, không suy diễn, không tóm tắt bớt nội dung, "
+    "không dịch. Chỉ trả về đúng câu văn bản cuối cùng, không thêm giải "
+    "thích."
 )
 
 
@@ -83,7 +93,7 @@ def is_safe_edit(
     metrics: dict,
     *,
     min_similarity: float = 0.55,
-    min_len_ratio: float = 0.6,
+    min_len_ratio: float = 0.5,
     max_len_ratio: float = 1.6,
 ) -> bool:
     """Reject edits that are too dissimilar, or that inflate/shrink length
