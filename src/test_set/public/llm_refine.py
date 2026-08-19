@@ -31,7 +31,7 @@ from text_normalize import normalize_text
 DEFAULT_LOCATION = "global"
 DEFAULT_CLEANUP_MODEL = "gemini-2.5-flash"
 DEFAULT_FUSION_MODEL = "gemini-2.5-flash"
-DEFAULT_TRANSLATE_MODEL = "gemini-2.5-flash"
+DEFAULT_TRANSLATE_MODEL = "gemini-3.1-flash-lite"
 
 CLEANUP_SYSTEM_PROMPT = (
     "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt (người nói có thể chêm "
@@ -66,10 +66,15 @@ FUSION_SYSTEM_PROMPT = (
 TRANSLATE_SYSTEM_PROMPT = (
     "Bạn là công cụ dịch thuật tiếng Việt sang tiếng Anh. Dịch chính xác câu "
     "sau sang tiếng Anh tự nhiên, giữ nguyên văn phong nói (spoken-style), "
-    "giữ nguyên ý nghĩa và mọi chi tiết trong câu gốc. TUYỆT ĐỐI không thêm "
-    "thông tin, không bỏ sót nội dung, không diễn giải, không thêm giải "
-    "thích. Chỉ trả về đúng câu dịch tiếng Anh, không thêm dấu ngoặc kép, "
-    "không thêm tiền tố."
+    "giữ nguyên ý nghĩa và mọi chi tiết trong câu gốc. Đại từ nhân xưng tiếng "
+    "Việt (chị, em, anh, cô...) mơ hồ giữa ngôi thứ 2 (you) và ngôi thứ 3 "
+    "(she/he) -- hãy dựa vào ngữ cảnh cả câu để xác định đúng: nếu câu đang "
+    "kể chuyện/tường thuật về một người khác (có dấu hiệu như trích lời nghĩ "
+    "trong ngoặc kép, 'kiểu...', 'là...') thì đó là ngôi thứ 3 (she/he), chỉ "
+    "dịch là 'you' khi rõ ràng người nói đang nói trực tiếp với người đó. "
+    "TUYỆT ĐỐI không thêm thông tin, không bỏ sót nội dung, không diễn giải, "
+    "không thêm giải thích. Chỉ trả về đúng câu dịch tiếng Anh, không thêm "
+    "dấu ngoặc kép, không thêm tiền tố."
 )
 
 
@@ -141,6 +146,26 @@ def create_client():
     return genai.Client(vertexai=True, project=project_id, location=location, credentials=credentials)
 
 
+def _thinking_config(model: str):
+    """Thinking tokens are drawn from the same max_output_tokens budget as
+    the visible answer -- on longer inputs that silently truncated the
+    actual cleaned/fused/translated text mid-sentence (caught by the diff
+    guard as an unsafe edit, but the real bug was excess thinking eating
+    the budget). These are plain cleanup/fusion/translation tasks, no deep
+    reasoning needed, so keep thinking minimal.
+
+    Gemini 2.5.x controls this via `thinking_budget` (token count, 0 =
+    off). Gemini 3.x replaced that with `thinking_level` ("LOW"/"MEDIUM"/
+    "HIGH", no off-switch) -- passing the wrong field name for a given
+    model family raises, so branch on the model string.
+    """
+    from google.genai import types
+
+    if model.startswith("gemini-3"):
+        return types.ThinkingConfig(thinking_level="LOW")
+    return types.ThinkingConfig(thinking_budget=0)
+
+
 def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> str:
     from google.genai import types
 
@@ -151,13 +176,7 @@ def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> s
             system_instruction=system_prompt,
             temperature=0.1,
             max_output_tokens=2048,
-            # Gemini 2.5's internal "thinking" tokens are drawn from the same
-            # max_output_tokens budget as the visible answer -- on longer
-            # inputs that silently truncated the actual cleaned/fused text
-            # mid-sentence (caught by the diff guard as an unsafe edit, but
-            # the real bug was here). This is a plain cleanup/fusion task,
-            # no reasoning needed, so turn thinking off entirely.
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            thinking_config=_thinking_config(model),
         ),
     )
     return (response.text or "").strip()
