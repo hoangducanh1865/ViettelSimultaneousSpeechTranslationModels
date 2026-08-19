@@ -92,7 +92,7 @@ def text_diff_metrics(before: str, after: str) -> dict:
 def is_safe_edit(
     metrics: dict,
     *,
-    min_similarity: float = 0.55,
+    min_similarity: float = 0.45,
     min_len_ratio: float = 0.5,
     max_len_ratio: float = 1.6,
 ) -> bool:
@@ -196,6 +196,7 @@ def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict)
         "llm_text": None,
         "final_text": rover_text,
         "metrics": None,
+        "best_reference": None,
         "accepted": False,
         "error": None,
     }
@@ -212,11 +213,30 @@ def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict)
             + "\n\nHãy tổng hợp thành một câu văn bản cuối cùng chính xác nhất."
         )
         llm_text = _call_gemini(client, model, FUSION_SYSTEM_PROMPT, prompt)
-        metrics = text_diff_metrics(rover_text, llm_text)
-        accepted = bool(llm_text) and is_safe_edit(metrics)
+
+        # Guard against drift from whichever input the fusion result actually
+        # resembles most -- NOT just rover_text. rover_text is the raw,
+        # unclean vote output (still has ASR errors like "buz"/"phây búc");
+        # fusion's whole job is to fix exactly that using the *cleaned*
+        # per-model texts, so a correct fusion can legitimately look quite
+        # different from rover_text alone while matching a cleaned voter
+        # almost exactly. Comparing only to rover_text would reject good
+        # corrections as "too different".
+        candidates = dict(per_model_texts)
+        candidates["rover"] = rover_text
+        best_name, best_metrics = None, None
+        for name, ref_text in candidates.items():
+            if not ref_text:
+                continue
+            m = text_diff_metrics(ref_text, llm_text)
+            if best_metrics is None or m["similarity"] > best_metrics["similarity"]:
+                best_name, best_metrics = name, m
+
+        accepted = bool(llm_text) and best_metrics is not None and is_safe_edit(best_metrics)
         result.update(
             llm_text=llm_text,
-            metrics=metrics,
+            metrics=best_metrics,
+            best_reference=best_name,
             accepted=accepted,
             final_text=llm_text if accepted else rover_text,
         )
