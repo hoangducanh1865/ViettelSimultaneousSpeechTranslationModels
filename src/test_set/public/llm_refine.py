@@ -1,0 +1,209 @@
+"""Optional LLM post-processing stage for the ROVER ensemble (Gemini, Vertex AI).
+
+Two steps, both guarded by a before/after diff check so a hallucinating or
+over-eager LLM call can never silently corrupt the transcript:
+
+1. clean_transcript(): per-voter cleanup (fix spacing/punctuation/ASR
+   artifacts, keep spoken style, must not change content).
+2. fuse_transcripts(): given the ROVER-combined text + every voter's cleaned
+   text, produce one final best transcript.
+
+In both cases, if the LLM output diverges too much from its input (too
+short/long, too dissimilar), the call is rejected and the *pre-LLM* text is
+kept instead -- the LLM can refine, never replace wholesale.
+
+Auth mirrors stuff/a_dat_gui/test_llm_flow.py's pattern (Vertex AI +
+service-account credentials), but reads the key from an env var
+(GEMINI_SERVICE_ACCOUNT_JSON, in-memory JSON string) instead of a local
+file path, since the notebook that sets this up never gets pushed to
+GitHub / cloned into Colab.
+"""
+
+from __future__ import annotations
+
+import difflib
+import json
+import os
+from typing import Optional
+
+from text_normalize import normalize_text
+
+DEFAULT_LOCATION = "global"
+DEFAULT_CLEANUP_MODEL = "gemini-2.5-flash"
+DEFAULT_FUSION_MODEL = "gemini-2.5-flash"
+
+CLEANUP_SYSTEM_PROMPT = (
+    "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt. Nhiệm vụ: chỉ sửa lỗi "
+    "chính tả nhỏ, dấu câu, khoảng trắng, và bỏ các từ/âm lặp do lỗi nhận "
+    "dạng giọng nói gây ra (không phải do người nói lặp thật). Giữ nguyên "
+    "văn phong nói tự nhiên (spoken-style), giữ nguyên ý nghĩa và độ dài "
+    "nội dung. TUYỆT ĐỐI không thêm, không bớt, không diễn giải lại, không "
+    "dịch sang ngôn ngữ khác. Chỉ trả về đúng văn bản đã làm sạch, không "
+    "thêm giải thích, không thêm dấu ngoặc kép, không thêm tiền tố."
+)
+
+FUSION_SYSTEM_PROMPT = (
+    "Bạn nhận được kết quả ASR từ nhiều hệ thống khác nhau cho cùng một đoạn "
+    "audio, cùng một bản đã hợp nhất bằng thuật toán ROVER (vote theo từng "
+    "từ, dựa trên confidence của từng hệ thống). Hãy tổng hợp lại thành một "
+    "câu chính xác nhất, ưu tiên nội dung xuất hiện ở đa số các bản, giữ "
+    "văn phong nói tự nhiên. TUYỆT ĐỐI không thêm thông tin không xuất hiện "
+    "ở bất kỳ bản nào, không suy diễn, không dịch. Chỉ trả về đúng câu văn "
+    "bản cuối cùng, không thêm giải thích."
+)
+
+
+# --------------------------------------------------------------------------
+# Before/after safety guard
+# --------------------------------------------------------------------------
+
+def text_diff_metrics(before: str, after: str) -> dict:
+    """Compare `after` (LLM output) against `before` (its input)."""
+    before_norm = normalize_text(before or "")
+    after_norm = normalize_text(after or "")
+    before_words = before_norm.split()
+    after_words = after_norm.split()
+
+    similarity = difflib.SequenceMatcher(None, before_norm, after_norm).ratio()
+    char_len_ratio = (len(after_norm) / len(before_norm)) if before_norm else float("inf")
+    word_len_ratio = (len(after_words) / len(before_words)) if before_words else float("inf")
+
+    return {
+        "similarity": similarity,
+        "char_len_ratio": char_len_ratio,
+        "word_len_ratio": word_len_ratio,
+        "before_chars": len(before_norm),
+        "after_chars": len(after_norm),
+        "before_words": len(before_words),
+        "after_words": len(after_words),
+    }
+
+
+def is_safe_edit(
+    metrics: dict,
+    *,
+    min_similarity: float = 0.55,
+    min_len_ratio: float = 0.6,
+    max_len_ratio: float = 1.6,
+) -> bool:
+    """Reject edits that are too dissimilar, or that inflate/shrink length
+    too much -- typical symptoms of an LLM paraphrasing, hallucinating extra
+    content, or truncating instead of just cleaning up."""
+    if metrics["similarity"] < min_similarity:
+        return False
+    if not (min_len_ratio <= metrics["char_len_ratio"] <= max_len_ratio):
+        return False
+    if not (min_len_ratio <= metrics["word_len_ratio"] <= max_len_ratio):
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------
+# Gemini client (Vertex AI, service-account auth)
+# --------------------------------------------------------------------------
+
+def create_client():
+    from google import genai
+    from google.oauth2 import service_account
+
+    creds_raw = os.environ.get("GEMINI_SERVICE_ACCOUNT_JSON")
+    project_id = os.environ.get("GEMINI_PROJECT_ID")
+    if not creds_raw:
+        raise RuntimeError("Missing GEMINI_SERVICE_ACCOUNT_JSON env var")
+    if not project_id:
+        raise RuntimeError("Missing GEMINI_PROJECT_ID env var")
+
+    info = json.loads(creds_raw)
+    credentials = service_account.Credentials.from_service_account_info(
+        info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    )
+    location = os.environ.get("GEMINI_LOCATION", DEFAULT_LOCATION)
+    return genai.Client(vertexai=True, project=project_id, location=location, credentials=credentials)
+
+
+def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> str:
+    from google.genai import types
+
+    response = client.models.generate_content(
+        model=model,
+        contents=user_content,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=0.1,
+            max_output_tokens=1024,
+        ),
+    )
+    return (response.text or "").strip()
+
+
+# --------------------------------------------------------------------------
+# The two refinement steps
+# --------------------------------------------------------------------------
+
+def clean_transcript(client, model: str, raw_text: str) -> dict:
+    """Per-voter cleanup. Never raises -- errors/unsafe edits fall back to
+    `final_text = raw_text` so a bad LLM call can't corrupt the pipeline."""
+    result = {
+        "input_text": raw_text,
+        "llm_text": None,
+        "final_text": raw_text,
+        "metrics": None,
+        "accepted": False,
+        "error": None,
+    }
+    if not raw_text or not raw_text.strip():
+        result["accepted"] = True  # nothing to clean
+        return result
+
+    try:
+        llm_text = _call_gemini(client, model, CLEANUP_SYSTEM_PROMPT, raw_text)
+        metrics = text_diff_metrics(raw_text, llm_text)
+        accepted = bool(llm_text) and is_safe_edit(metrics)
+        result.update(
+            llm_text=llm_text,
+            metrics=metrics,
+            accepted=accepted,
+            final_text=llm_text if accepted else raw_text,
+        )
+    except Exception as e:
+        result["error"] = repr(e)
+
+    return result
+
+
+def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict) -> dict:
+    """Synthesize a final transcript from rover_text + each voter's
+    (already-cleaned) text. Falls back to rover_text on error/unsafe edit."""
+    result = {
+        "input_rover_text": rover_text,
+        "llm_text": None,
+        "final_text": rover_text,
+        "metrics": None,
+        "accepted": False,
+        "error": None,
+    }
+    if not rover_text or not rover_text.strip():
+        result["accepted"] = True
+        return result
+
+    try:
+        lines = [f"- {name}: {text}" for name, text in per_model_texts.items() if text]
+        lines.append(f"- rover (hợp nhất bằng vote): {rover_text}")
+        prompt = (
+            "Các bản ASR cho cùng một đoạn audio:\n"
+            + "\n".join(lines)
+            + "\n\nHãy tổng hợp thành một câu văn bản cuối cùng chính xác nhất."
+        )
+        llm_text = _call_gemini(client, model, FUSION_SYSTEM_PROMPT, prompt)
+        metrics = text_diff_metrics(rover_text, llm_text)
+        accepted = bool(llm_text) and is_safe_edit(metrics)
+        result.update(
+            llm_text=llm_text,
+            metrics=metrics,
+            accepted=accepted,
+            final_text=llm_text if accepted else rover_text,
+        )
+    except Exception as e:
+        result["error"] = repr(e)
+
+    return result

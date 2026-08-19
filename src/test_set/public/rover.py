@@ -33,8 +33,22 @@ from asr_client_internal_whisper import InternalWhisperClient
 from asr_client_chirp3 import Chirp3Client
 from asr_client_phowhisper import PhoWhisperClient
 from text_normalize import tokenize
+import llm_refine
 
 DEFAULT_CONFIDENCE = 0.5  # vote weight used whenever a voter's confidence is None
+
+# Multiplier applied to a voter's weight (confidence, or DEFAULT_CONFIDENCE if
+# missing) before ROVER voting. 1.0 = no change. PhoWhisper is bumped up a
+# bit: it's a Vietnamese-specific model that's held up well in spot checks,
+# and its confidence now comes from a real (if uncalibrated) avg-token-prob
+# rather than a fixed guess, so it deserves a slight edge over a plain 0.5
+# default -- not enough to let it dominate internal_whisper's real
+# high-90s confidence, just enough to win more ties against Chirp-3 (still
+# stuck at the DEFAULT_CONFIDENCE fallback).
+MODEL_WEIGHT_MULTIPLIER = {
+    "phowhisper": 1.15,
+}
+
 CACHE_DIRNAME = "rover_cache"
 ROVER_OUTPUT_SUBDIR = "rover_output"
 AUDIO_EXTENSIONS = (".wav",)
@@ -257,6 +271,82 @@ def get_or_call(
     return result
 
 
+def llm_clean_cache_path(dataset_root: Path, model_name: str, wav_path: Path) -> Path:
+    relpath = wav_path.relative_to(dataset_root)
+    return dataset_root / CACHE_DIRNAME / "llm_clean" / model_name / relpath.with_suffix(".json")
+
+
+def llm_fusion_cache_path(dataset_root: Path, wav_path: Path) -> Path:
+    relpath = wav_path.relative_to(dataset_root)
+    return dataset_root / CACHE_DIRNAME / "llm_fusion" / relpath.with_suffix(".json")
+
+
+def _load_cached_json(cache_path: Path) -> Optional[dict]:
+    if not cache_path.exists():
+        return None
+    try:
+        with open(cache_path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None  # corrupt cache file -> treat as missing, will be re-called
+
+
+def get_or_clean(
+    llm_client,
+    model: str,
+    model_name: str,
+    dataset_root: Path,
+    wav_path: Path,
+    raw_text: str,
+    *,
+    force: bool,
+    stats: dict,
+) -> dict:
+    """Cache-or-call for the per-voter LLM cleanup step."""
+    cache_path = llm_clean_cache_path(dataset_root, model_name, wav_path)
+
+    if not force:
+        cached = _load_cached_json(cache_path)
+        if cached is not None:
+            stats["llm_clean_cache_hits"][model_name] = stats["llm_clean_cache_hits"].get(model_name, 0) + 1
+            return cached
+
+    result = llm_refine.clean_transcript(llm_client, model, raw_text)
+    stats["llm_clean_calls"][model_name] = stats["llm_clean_calls"].get(model_name, 0) + 1
+    if not result.get("accepted", False):
+        stats["llm_clean_rejected"][model_name] = stats["llm_clean_rejected"].get(model_name, 0) + 1
+    _atomic_write_json(cache_path, result)
+    return result
+
+
+def get_or_fuse(
+    llm_client,
+    model: str,
+    dataset_root: Path,
+    wav_path: Path,
+    rover_text: str,
+    per_model_texts: dict,
+    *,
+    force: bool,
+    stats: dict,
+) -> dict:
+    """Cache-or-call for the final fusion LLM step."""
+    cache_path = llm_fusion_cache_path(dataset_root, wav_path)
+
+    if not force:
+        cached = _load_cached_json(cache_path)
+        if cached is not None:
+            stats["llm_fusion_cache_hits"] += 1
+            return cached
+
+    result = llm_refine.fuse_transcripts(llm_client, model, rover_text, per_model_texts)
+    stats["llm_fusion_calls"] += 1
+    if not result.get("accepted", False):
+        stats["llm_fusion_rejected"] += 1
+    _atomic_write_json(cache_path, result)
+    return result
+
+
 def combine_for_file(
     dataset_root: Path,
     wav_path: Path,
@@ -274,7 +364,8 @@ def combine_for_file(
         }
         if result.error is not None or result.text is None:
             continue
-        weight = result.confidence if result.confidence is not None else DEFAULT_CONFIDENCE
+        base_weight = result.confidence if result.confidence is not None else DEFAULT_CONFIDENCE
+        weight = base_weight * MODEL_WEIGHT_MULTIPLIER.get(model_name, 1.0)
         hypotheses.append((model_name, tokenize(result.text), weight))
 
     combined = {
@@ -315,6 +406,19 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--force", action="store_true", help="Ignore cache, re-call every model for every file")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N audio files (smoke testing)")
+    parser.add_argument(
+        "--llm-refine",
+        action="store_true",
+        help=(
+            "Enable Gemini (Vertex AI) post-processing: per-voter cleanup + final fusion. "
+            "Requires GEMINI_SERVICE_ACCOUNT_JSON and GEMINI_PROJECT_ID env vars. "
+            "Every LLM call is guarded by a before/after diff check (see llm_refine.is_safe_edit) "
+            "-- an edit that's too dissimilar or too long/short than its input is rejected and "
+            "the pre-LLM text is kept instead."
+        ),
+    )
+    parser.add_argument("--llm-cleanup-model", default=llm_refine.DEFAULT_CLEANUP_MODEL)
+    parser.add_argument("--llm-fusion-model", default=llm_refine.DEFAULT_FUSION_MODEL)
     return parser.parse_args(argv)
 
 
@@ -337,8 +441,21 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"Dataset root : {dataset_root}")
     print(f"Models       : {', '.join(c.name for c in clients)}")
     print(f"Audio files  : {len(wav_files)}")
+    print(f"LLM refine   : {'on (' + args.llm_cleanup_model + ' / ' + args.llm_fusion_model + ')' if args.llm_refine else 'off'}")
 
     stats = {"cache_hits": {}, "fresh_calls": {}, "errors_by_model": {}}
+    llm_client = None
+    if args.llm_refine:
+        stats.update(
+            llm_clean_cache_hits={},
+            llm_clean_calls={},
+            llm_clean_rejected={},
+            llm_fusion_cache_hits=0,
+            llm_fusion_calls=0,
+            llm_fusion_rejected=0,
+        )
+        llm_client = llm_refine.create_client()
+
     output_dir = dataset_root / CACHE_DIRNAME / ROVER_OUTPUT_SUBDIR
 
     for wav_path in wav_files:
@@ -350,10 +467,39 @@ def main(argv: Optional[list[str]] = None) -> None:
             )
 
         combined = combine_for_file(dataset_root, wav_path, per_model)
+        final_text = combined["rover_text"]
+
+        if args.llm_refine and llm_client is not None:
+            clean_results = {}
+            per_model_clean_texts = {}
+            for model_name, result in per_model.items():
+                if result.error is not None or not result.text:
+                    continue
+                clean = get_or_clean(
+                    llm_client, args.llm_cleanup_model, model_name, dataset_root, wav_path, result.text,
+                    force=args.force, stats=stats,
+                )
+                clean_results[model_name] = clean
+                per_model_clean_texts[model_name] = clean["final_text"]
+
+            fusion = None
+            if combined["rover_text"]:
+                fusion = get_or_fuse(
+                    llm_client, args.llm_fusion_model, dataset_root, wav_path,
+                    combined["rover_text"], per_model_clean_texts, force=args.force, stats=stats,
+                )
+                final_text = fusion["final_text"]
+
+            combined["llm_refine"] = {
+                "per_model_clean": clean_results,
+                "fusion": fusion,
+                "final_text": final_text,
+            }
+
         out_path = (output_dir / relpath).with_suffix(".json")
         _atomic_write_json(out_path, combined)
 
-        print(f"[{relpath}] -> {combined['rover_text']!r}")
+        print(f"[{relpath}] -> {final_text!r}")
 
     run_summary = {
         "schema_version": 1,
@@ -363,8 +509,18 @@ def main(argv: Optional[list[str]] = None) -> None:
         "cache_hits": stats["cache_hits"],
         "fresh_calls": stats["fresh_calls"],
         "errors_by_model": stats["errors_by_model"],
+        "llm_refine": args.llm_refine,
         "run_at": datetime.now(timezone.utc).isoformat(),
     }
+    if args.llm_refine:
+        run_summary.update(
+            llm_clean_cache_hits=stats["llm_clean_cache_hits"],
+            llm_clean_calls=stats["llm_clean_calls"],
+            llm_clean_rejected=stats["llm_clean_rejected"],
+            llm_fusion_cache_hits=stats["llm_fusion_cache_hits"],
+            llm_fusion_calls=stats["llm_fusion_calls"],
+            llm_fusion_rejected=stats["llm_fusion_rejected"],
+        )
     _atomic_write_json(dataset_root / CACHE_DIRNAME / "run_summary.json", run_summary)
     print("\nRun summary:")
     print(json.dumps(run_summary, ensure_ascii=False, indent=2))
