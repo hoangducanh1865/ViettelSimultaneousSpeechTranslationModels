@@ -24,6 +24,7 @@ from __future__ import annotations
 import difflib
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
 from text_normalize import normalize_text
@@ -33,7 +34,35 @@ DEFAULT_CLEANUP_MODEL = "gemini-2.5-flash"
 DEFAULT_FUSION_MODEL = "gemini-2.5-flash"
 DEFAULT_TRANSLATE_MODEL = "gemini-3.1-flash-lite"
 
-CLEANUP_SYSTEM_PROMPT = (
+
+def _load_context_doc(filename: str) -> str:
+    """Read a small reference doc (e.g. vietnamese_pronoun_notes.md) sitting
+    next to this module, to append to every prompt as extra context.
+
+    Never raises: a missing/unreadable doc just means the corresponding
+    context section is omitted, not a hard failure of the whole ensemble.
+    """
+    path = Path(__file__).parent / filename
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+# Loaded once at import time and appended to every cleanup/fusion/translate
+# prompt below -- see vietnamese_pronoun_notes.md for the "chỉ"/"ảnh"/"ổng"/...
+# contracted-pronoun phenomenon this exists to prevent the LLM from "fixing"
+# away (which silently flips a 3rd-person reference into a 2nd-person one).
+_PRONOUN_CONTEXT_NOTES = _load_context_doc("vietnamese_pronoun_notes.md")
+
+
+def _with_context(prompt: str) -> str:
+    if not _PRONOUN_CONTEXT_NOTES:
+        return prompt
+    return prompt + "\n\n---\n\n" + _PRONOUN_CONTEXT_NOTES
+
+
+CLEANUP_SYSTEM_PROMPT = _with_context(
     "Bạn là công cụ hậu xử lý văn bản ASR tiếng Việt (người nói có thể chêm "
     "từ/tên riêng tiếng Anh - code-switching). Nhiệm vụ: sửa lỗi chính tả, "
     "dấu câu, khoảng trắng; sửa các từ/tên riêng tiếng Anh bị nhận dạng sai "
@@ -48,7 +77,7 @@ CLEANUP_SYSTEM_PROMPT = (
     "thêm dấu ngoặc kép, không thêm tiền tố."
 )
 
-FUSION_SYSTEM_PROMPT = (
+FUSION_SYSTEM_PROMPT = _with_context(
     "Bạn nhận được kết quả ASR từ nhiều hệ thống khác nhau cho cùng một đoạn "
     "audio tiếng Việt (có thể chêm từ/tên riêng tiếng Anh - code-switching), "
     "cùng một bản đã hợp nhất bằng thuật toán ROVER (vote theo từng từ, dựa "
@@ -63,7 +92,7 @@ FUSION_SYSTEM_PROMPT = (
     "thích."
 )
 
-TRANSLATE_SYSTEM_PROMPT = (
+TRANSLATE_SYSTEM_PROMPT = _with_context(
     "Bạn là công cụ dịch thuật tiếng Việt sang tiếng Anh. Dịch chính xác câu "
     "sau sang tiếng Anh tự nhiên, giữ nguyên văn phong nói (spoken-style), "
     "giữ nguyên ý nghĩa và mọi chi tiết trong câu gốc. Đại từ nhân xưng tiếng "
