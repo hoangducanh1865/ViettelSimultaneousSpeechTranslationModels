@@ -140,7 +140,14 @@ def _call_gemini(client, model: str, system_prompt: str, user_content: str) -> s
         config=types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=0.1,
-            max_output_tokens=1024,
+            max_output_tokens=2048,
+            # Gemini 2.5's internal "thinking" tokens are drawn from the same
+            # max_output_tokens budget as the visible answer -- on longer
+            # inputs that silently truncated the actual cleaned/fused text
+            # mid-sentence (caught by the diff guard as an unsafe edit, but
+            # the real bug was here). This is a plain cleanup/fusion task,
+            # no reasoning needed, so turn thinking off entirely.
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
     return (response.text or "").strip()
