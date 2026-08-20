@@ -114,12 +114,22 @@ def audio_language_verdict(
     wav_path: Path,
     *,
     expected_language: str = "vi",
+    min_prob: float = 0.15,
 ) -> dict:
     """Judge whether `wav_path` should be kept for a Vietnamese-source
     pipeline: kept unless the audio is entirely non-`expected_language`
-    (every 30s window's top language is something else) -- a clip that's
-    mostly Vietnamese with one English-quoted segment is still kept, only
-    a wholly off-language clip is dropped.
+    (no 30s window both picks `expected_language` as its top language AND
+    gives it at least `min_prob`) -- a clip that's mostly Vietnamese with
+    one English-quoted segment is still kept, only a wholly off-language
+    clip is dropped.
+
+    The `min_prob` floor matters in practice: on short/accented clips
+    whisper-base's LID head is often barely confident at all, and picking
+    whichever language narrowly edges out the rest (e.g. vi=0.12 vs
+    en=0.11 among ~100 candidates) is not a meaningful "this is
+    Vietnamese" signal -- it lets fully non-Vietnamese clips slip through
+    just because "vi" happened to win a coin-flip-level tie. Requiring a
+    real minimum probability, not just the argmax, catches those.
 
     Returns:
         {
@@ -133,7 +143,10 @@ def audio_language_verdict(
     try:
         segments = detect_language_per_segment(wav_path)
         top_langs = [max(seg, key=seg.get) for seg in segments]
-        keep = expected_language in top_langs
+        keep = any(
+            top == expected_language and seg.get(expected_language, 0.0) >= min_prob
+            for top, seg in zip(top_langs, segments)
+        )
         return {
             "keep": keep,
             "expected_language": expected_language,
