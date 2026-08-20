@@ -35,6 +35,7 @@ from asr_client_internal_whisper import InternalWhisperClient
 from asr_client_chirp3 import Chirp3Client
 from asr_client_phowhisper import PhoWhisperClient
 from text_normalize import tokenize
+import lang_id
 import llm_refine
 
 DEFAULT_CONFIDENCE = 0.5  # vote weight used whenever a voter's confidence is None
@@ -399,6 +400,37 @@ def get_or_translate(
     return result
 
 
+def lang_id_cache_path(dataset_root: Path, wav_path: Path) -> Path:
+    relpath = wav_path.relative_to(dataset_root)
+    return dataset_root / CACHE_DIRNAME / "lang_id" / relpath.with_suffix(".json")
+
+
+def get_or_detect_language(
+    dataset_root: Path,
+    wav_path: Path,
+    *,
+    expected_language: str,
+    force: bool,
+    stats: dict,
+    lock: threading.Lock,
+) -> dict:
+    """Cache-or-call for the audio-based language-ID filter (lang_id.py)."""
+    cache_path = lang_id_cache_path(dataset_root, wav_path)
+
+    if not force:
+        cached = _load_cached_json(cache_path)
+        if cached is not None:
+            _incr(stats, lock, "lang_filter_cache_hits")
+            return cached
+
+    result = lang_id.audio_language_verdict(wav_path, expected_language=expected_language)
+    _incr(stats, lock, "lang_filter_calls")
+    if not result["keep"]:
+        _incr(stats, lock, "lang_filter_dropped")
+    _atomic_write_json(cache_path, result)
+    return result
+
+
 def run_phowhisper_batch_prepass(
     client: BaseASRClient,
     dataset_root: Path,
@@ -507,6 +539,17 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("--force", action="store_true", help="Ignore cache, re-call every model for every file")
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N audio files (smoke testing)")
+    parser.add_argument(
+        "--no-language-filter",
+        action="store_true",
+        help=(
+            "Disable the audio-based language-ID filter (lang_id.py, a small multilingual "
+            "Whisper's language-detection head) that runs before ASR/LLM and drops any file "
+            "where no 30s window is detected as --language -- e.g. a fully-English clip gets "
+            "dropped from a --language vi run, but a mostly-Vietnamese clip with one "
+            "English-quoted segment is kept. Verdicts are cached under rover_cache/lang_id/."
+        ),
+    )
     parser.add_argument(
         "--llm-refine",
         action="store_true",
@@ -662,6 +705,32 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     stats = {"cache_hits": {}, "fresh_calls": {}, "errors_by_model": {}}
     lock = threading.Lock()
+
+    n_files_before_filter = len(wav_files)
+    dropped_files: list[tuple[Path, dict]] = []
+    if not args.no_language_filter:
+        print(f"Language filter: checking {len(wav_files)} file(s) for '{args.language}' audio...")
+        kept_files = []
+        for wav_path in wav_files:
+            verdict = get_or_detect_language(
+                dataset_root, wav_path,
+                expected_language=args.language, force=args.force, stats=stats, lock=lock,
+            )
+            if verdict["keep"]:
+                kept_files.append(wav_path)
+            else:
+                dropped_files.append((wav_path, verdict))
+        wav_files = kept_files
+        print(
+            f"Language filter: kept {len(wav_files)}/{n_files_before_filter} file(s), "
+            f"dropped {len(dropped_files)} with no '{args.language}' segment detected."
+        )
+        if not wav_files:
+            raise SystemExit(
+                f"Language filter dropped every file (none had a '{args.language}' segment). "
+                "Pass --no-language-filter to disable it."
+            )
+
     llm_client = None
     if args.llm_refine:
         stats.update(
@@ -720,6 +789,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         "llm_refine": args.llm_refine,
         "translate": args.translate,
         "run_at": datetime.now(timezone.utc).isoformat(),
+        "language_filter": not args.no_language_filter,
+        "n_files_before_language_filter": n_files_before_filter,
+        "lang_filter_cache_hits": stats.get("lang_filter_cache_hits", 0),
+        "lang_filter_calls": stats.get("lang_filter_calls", 0),
+        "lang_filter_dropped": stats.get("lang_filter_dropped", 0),
+        "dropped_files": [
+            {"audio_relpath": str(p.relative_to(dataset_root)), "segment_top_langs": v["segment_top_langs"]}
+            for p, v in dropped_files
+        ],
     }
     if args.llm_refine:
         run_summary.update(
