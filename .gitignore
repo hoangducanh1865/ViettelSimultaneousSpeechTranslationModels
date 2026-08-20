@@ -221,3 +221,12 @@ __marimo__/
 debug/
 stuff/
 noteboooks/
+
+.env
+.venv/
+__pycache__/
+*.pyc
+dataset/raw_audio/
+dataset/transcripts/
+cookies.txt
+
