@@ -44,14 +44,18 @@ class Cue:
     text: str
 
 
-def find_subtitle_file(raw_dir: Path, video_id: str, lang: str) -> Optional[Path]:
+def find_subtitle_file(search_dir: Path, video_id: str, lang: str) -> Optional[Path]:
     """yt-dlp writes subtitles as {video_id}.{lang}.{srt,vtt} (whichever
     format was available -- --sub-format "srt/vtt" prefers srt). Manual
     subs are written in preference to auto ones for a given language, so
-    there's normally exactly one file per (video_id, lang)."""
+    there's normally exactly one file per (video_id, lang). Looks in
+    `search_dir` only (the wav's own parent directory) -- crawl.py's own
+    output is flat, but this stays correct if the whole run got uploaded
+    a directory level off (e.g. --output-dir raw_audio uploaded as a
+    subfolder instead of its contents being uploaded directly)."""
     candidates = [
         p for ext in SUBTITLE_EXTENSIONS
-        for p in raw_dir.glob(f"{video_id}.{lang}{ext}")
+        for p in search_dir.glob(f"{video_id}.{lang}{ext}")
     ]
     return candidates[0] if candidates else None
 
@@ -175,7 +179,7 @@ def cut_and_check_segment(
 
 def process_one_video(
     video_id: str,
-    raw_dir: Path,
+    wav_path: Path,
     out_dir: Path,
     *,
     target_max_sec: float,
@@ -190,9 +194,11 @@ def process_one_video(
         "kept": 0,
     }
 
-    wav_path = raw_dir / f"{video_id}.wav"
-    en_sub_path = find_subtitle_file(raw_dir, video_id, "en")
-    vi_sub_path = find_subtitle_file(raw_dir, video_id, "vi")
+    # Subtitles are looked up next to the wav itself, not a fixed raw_dir --
+    # tolerates the crawl output having been uploaded a directory level off.
+    sub_dir = wav_path.parent
+    en_sub_path = find_subtitle_file(sub_dir, video_id, "en")
+    vi_sub_path = find_subtitle_file(sub_dir, video_id, "vi")
 
     if not wav_path.exists() or en_sub_path is None or vi_sub_path is None:
         stats["error"] = (
@@ -269,8 +275,12 @@ def save_processed_video_ids(out_dir: Path, video_ids: set[str]) -> None:
         json.dump(sorted(video_ids), f, ensure_ascii=False, indent=2)
 
 
-def discover_video_ids(raw_dir: Path) -> list[str]:
-    return sorted(p.stem for p in raw_dir.glob("*.wav"))
+def discover_wav_files(raw_dir: Path) -> list[Path]:
+    # Recursive on purpose: crawl.py's own output is flat, but an upload
+    # can easily land the whole output folder one level deeper (e.g. the
+    # local raw_audio/ folder itself dragged into Drive instead of just
+    # its contents) -- searching the whole tree tolerates that.
+    return sorted(raw_dir.rglob("*.wav"))
 
 
 def main(argv: Optional[list[str]] = None) -> None:
@@ -286,7 +296,16 @@ def main(argv: Optional[list[str]] = None) -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = args.out_dir / "manifest.jsonl"
 
-    video_ids = discover_video_ids(args.raw_dir)
+    wav_files = discover_wav_files(args.raw_dir)
+    wav_by_id: dict[str, Path] = {}
+    for p in wav_files:
+        if p.stem in wav_by_id and wav_by_id[p.stem] != p:
+            print(f"WARNING: duplicate video id '{p.stem}' found at both "
+                  f"{wav_by_id[p.stem]} and {p} -- keeping the first one found.")
+            continue
+        wav_by_id[p.stem] = p
+    video_ids = sorted(wav_by_id)
+
     if args.limit is not None:
         video_ids = video_ids[: args.limit]
     if not video_ids:
@@ -301,7 +320,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         for i, video_id in enumerate(pending, 1):
             print(f"[{i}/{len(pending)}] {video_id}")
             rows, stats = process_one_video(
-                video_id, args.raw_dir, args.out_dir,
+                video_id, wav_by_id[video_id], args.out_dir,
                 target_max_sec=args.target_max_sec, min_seg_sec=args.min_seg_sec,
             )
             for row in rows:
