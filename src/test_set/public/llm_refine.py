@@ -115,6 +115,62 @@ TRANSLATE_SYSTEM_PROMPT = _with_context(
     "dấu ngoặc kép, không thêm tiền tố."
 )
 
+# English-source variants: same job as the two prompts above, but for ASR
+# output whose source language is English, not Vietnamese. The
+# Vietnamese-phonetic-transliteration-fixing instruction ("phây búc" ->
+# "Facebook") and the contracted-pronoun-preservation rule don't apply here
+# -- those are phenomena specific to Vietnamese ASR/source text -- so they're
+# dropped rather than reused. Deliberately NOT wrapped in
+# _with_context()/_PRONOUN_CONTEXT_NOTES: that doc is about interpreting
+# Vietnamese contracted 3rd-person forms in Vietnamese source text, which is
+# irrelevant noise for cleaning English text.
+CLEANUP_SYSTEM_PROMPT_EN = (
+    "You are an ASR post-processing tool for English speech from Vietnamese "
+    "speakers (may code-switch Vietnamese names, places, or words). Fix "
+    "spelling, punctuation, and spacing; correct accent- or homophone-driven "
+    "ASR errors (e.g. 'there'/'their', a misheard word that doesn't fit the "
+    "sentence); remove word/phrase repetition caused by ASR recognition "
+    "errors, not real speaker repetition (e.g. 'the the the' -> 'the'). "
+    "Preserve Vietnamese proper nouns and names exactly as ASR transcribed "
+    "them -- do not invent diacritics ASR didn't produce, do not guess a "
+    "'corrected' spelling. Keep the natural spoken style and the full "
+    "meaning of the sentence. Absolutely no new information, no "
+    "paraphrasing, no summarizing, no translating. Return only the "
+    "corrected text, no explanation, no quotes, no prefix."
+)
+
+FUSION_SYSTEM_PROMPT_EN = (
+    "You receive ASR results from several different systems for the same "
+    "English audio segment (speaker may be a Vietnamese person, possibly "
+    "code-switching Vietnamese names/words), plus one version already "
+    "merged by the ROVER algorithm (word-level vote weighted by each "
+    "system's confidence). Synthesize the most accurate final sentence: "
+    "prefer content that appears in most versions; if versions only differ "
+    "in how a proper noun or Vietnamese word is spelled/transcribed, prefer "
+    "the more clearly correct spelling even if it's the minority version; "
+    "keep the natural spoken style. Absolutely do not add information that "
+    "doesn't appear in any version, do not infer, do not summarize, do not "
+    "translate. Return only the final sentence, no explanation."
+)
+
+TRANSLATE_EN_VI_SYSTEM_PROMPT = (
+    "Bạn là công cụ dịch thuật tiếng Anh sang tiếng Việt. Dịch chính xác câu "
+    "sau sang tiếng Việt tự nhiên, giữ văn phong nói (spoken-style), giữ "
+    "nguyên ý nghĩa và mọi chi tiết trong câu gốc. Không có thông tin về "
+    "tuổi/giới tính/quan hệ giữa người nói, nên mặc định xưng 'tôi', gọi "
+    "người nghe là 'bạn' trừ khi chính câu cần dịch có tín hiệu rõ ràng khác "
+    "(một cái tên được gọi trực tiếp, một danh xưng quan hệ gia đình, một "
+    "kính ngữ...). Nếu có 'Phụ đề tham khảo' đi kèm: đó là phụ đề tiếng Việt "
+    "gốc của video, có thể KHÔNG khớp thời gian chính xác với câu tiếng Anh "
+    "cần dịch (do lệch giữa 2 track phụ đề) -- chỉ dùng nó để tham khảo văn "
+    "phong, cách xưng hô, thuật ngữ/tên riêng đã được dịch sẵn trong video "
+    "này, TUYỆT ĐỐI không chép lại nguyên văn phụ đề tham khảo nếu nội dung "
+    "của nó không khớp với đúng câu tiếng Anh cần dịch -- luôn ưu tiên dịch "
+    "đúng theo câu tiếng Anh thực tế. TUYỆT ĐỐI không thêm thông tin, không "
+    "bỏ sót nội dung, không diễn giải, không thêm giải thích. Chỉ trả về "
+    "đúng câu dịch tiếng Việt, không thêm dấu ngoặc kép, không thêm tiền tố."
+)
+
 
 # --------------------------------------------------------------------------
 # Before/after safety guard
@@ -243,9 +299,15 @@ def _call_gemini(
 # The two refinement steps
 # --------------------------------------------------------------------------
 
-def clean_transcript(client, model: str, raw_text: str) -> dict:
+def clean_transcript(
+    client, model: str, raw_text: str, *, system_prompt: str = CLEANUP_SYSTEM_PROMPT
+) -> dict:
     """Per-voter cleanup. Never raises -- errors/unsafe edits fall back to
-    `final_text = raw_text` so a bad LLM call can't corrupt the pipeline."""
+    `final_text = raw_text` so a bad LLM call can't corrupt the pipeline.
+
+    `system_prompt` defaults to the Vietnamese-source prompt (zero behavior
+    change for existing callers); pass `CLEANUP_SYSTEM_PROMPT_EN` for
+    English-source ASR text."""
     result = {
         "input_text": raw_text,
         "llm_text": None,
@@ -259,7 +321,7 @@ def clean_transcript(client, model: str, raw_text: str) -> dict:
         return result
 
     try:
-        llm_text = _call_gemini(client, model, CLEANUP_SYSTEM_PROMPT, raw_text)
+        llm_text = _call_gemini(client, model, system_prompt, raw_text)
         metrics = text_diff_metrics(raw_text, llm_text)
         accepted = bool(llm_text) and is_safe_edit(metrics)
         result.update(
@@ -274,9 +336,16 @@ def clean_transcript(client, model: str, raw_text: str) -> dict:
     return result
 
 
-def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict) -> dict:
+def fuse_transcripts(
+    client, model: str, rover_text: str, per_model_texts: dict,
+    *, system_prompt: str = FUSION_SYSTEM_PROMPT,
+) -> dict:
     """Synthesize a final transcript from rover_text + each voter's
-    (already-cleaned) text. Falls back to rover_text on error/unsafe edit."""
+    (already-cleaned) text. Falls back to rover_text on error/unsafe edit.
+
+    `system_prompt` defaults to the Vietnamese-source prompt (zero behavior
+    change for existing callers); pass `FUSION_SYSTEM_PROMPT_EN` for
+    English-source ASR text."""
     result = {
         "input_rover_text": rover_text,
         "llm_text": None,
@@ -298,7 +367,7 @@ def fuse_transcripts(client, model: str, rover_text: str, per_model_texts: dict)
             + "\n".join(lines)
             + "\n\nHãy tổng hợp thành một câu văn bản cuối cùng chính xác nhất."
         )
-        llm_text = _call_gemini(client, model, FUSION_SYSTEM_PROMPT, prompt)
+        llm_text = _call_gemini(client, model, system_prompt, prompt)
 
         # Guard against drift from whichever input the fusion result actually
         # resembles most -- NOT just rover_text. rover_text is the raw,
@@ -384,6 +453,58 @@ def translate_text(client, model: str, source_text: str) -> dict:
     try:
         llm_text = _call_gemini(
             client, model, TRANSLATE_SYSTEM_PROMPT, source_text,
+            minimal_thinking=False, max_output_tokens=4096,
+        )
+        accepted = is_reasonable_translation_length(source_text, llm_text)
+        result.update(
+            llm_text=llm_text,
+            accepted=accepted,
+            final_text=llm_text if accepted else None,
+        )
+    except Exception as e:
+        result["error"] = repr(e)
+
+    return result
+
+
+def translate_text_en_vi(
+    client, model: str, source_text: str, *, reference_hint: Optional[str] = None
+) -> dict:
+    """Translate English ASR text to Vietnamese, optionally guided by a
+    loosely-aligned Vietnamese reference caption for the same rough segment.
+
+    `reference_hint` exists to make use of a video's own crawled Vietnamese
+    captions without depending on their time-alignment to `source_text`
+    being exact (it isn't reliable -- the two subtitle tracks can drift
+    against each other over a video's runtime). The prompt explicitly tells
+    the model to treat it as a style/terminology reference, not as the
+    thing to translate, so a mismatched hint can't leak wrong content into
+    `final_text`.
+
+    Same no-fallback shape as `translate_text` (VI->EN): the source
+    language differs from the output, so there's nothing sensible to fall
+    back to on rejection/error -- `final_text` stays None.
+    """
+    result = {
+        "source_text": source_text,
+        "reference_hint": reference_hint,
+        "llm_text": None,
+        "final_text": None,
+        "accepted": False,
+        "error": None,
+    }
+    if not source_text or not source_text.strip():
+        result["accepted"] = True
+        result["final_text"] = ""
+        return result
+
+    try:
+        user_content = source_text
+        if reference_hint and reference_hint.strip():
+            user_content = f"{source_text}\n\n---\nPhụ đề tham khảo (có thể lệch thời gian): {reference_hint}"
+
+        llm_text = _call_gemini(
+            client, model, TRANSLATE_EN_VI_SYSTEM_PROMPT, user_content,
             minimal_thinking=False, max_output_tokens=4096,
         )
         accepted = is_reasonable_translation_length(source_text, llm_text)

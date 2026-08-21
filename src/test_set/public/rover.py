@@ -59,6 +59,22 @@ AUDIO_EXTENSIONS = (".wav",)
 DEFAULT_MAX_WORKERS = 5  # concurrent files in flight
 PHOWHISPER_BATCH_SIZE = 8  # files per generate() call in the batch pre-pass
 
+# Cleanup/fusion prompts are ASR-source-language-specific (the Vietnamese
+# ones fix Vietnamese-phonetic-transliteration ASR errors and preserve
+# Vietnamese contracted pronouns, neither of which applies to English
+# source text) -- selected by --language in main(), threaded through
+# process_one_file() as args.cleanup_system_prompt/args.fusion_system_prompt.
+# An explicit dict (not e.g. "vi" vs "anything else") so an unrecognized
+# --language with --llm-refine fails loudly instead of silently guessing.
+CLEANUP_PROMPTS_BY_LANGUAGE = {
+    "vi": llm_refine.CLEANUP_SYSTEM_PROMPT,
+    "en": llm_refine.CLEANUP_SYSTEM_PROMPT_EN,
+}
+FUSION_PROMPTS_BY_LANGUAGE = {
+    "vi": llm_refine.FUSION_SYSTEM_PROMPT,
+    "en": llm_refine.FUSION_SYSTEM_PROMPT_EN,
+}
+
 ALL_CLIENT_BUILDERS = {
     "internal_whisper": lambda: InternalWhisperClient(),
     "chirp3": lambda: Chirp3Client(),
@@ -317,6 +333,7 @@ def get_or_clean(
     wav_path: Path,
     raw_text: str,
     *,
+    system_prompt: str,
     force: bool,
     stats: dict,
     lock: threading.Lock,
@@ -330,7 +347,7 @@ def get_or_clean(
             _incr(stats, lock, "llm_clean_cache_hits", model_name)
             return cached
 
-    result = llm_refine.clean_transcript(llm_client, model, raw_text)
+    result = llm_refine.clean_transcript(llm_client, model, raw_text, system_prompt=system_prompt)
     _incr(stats, lock, "llm_clean_calls", model_name)
     if not result.get("accepted", False):
         _incr(stats, lock, "llm_clean_rejected", model_name)
@@ -346,6 +363,7 @@ def get_or_fuse(
     rover_text: str,
     per_model_texts: dict,
     *,
+    system_prompt: str,
     force: bool,
     stats: dict,
     lock: threading.Lock,
@@ -359,7 +377,9 @@ def get_or_fuse(
             _incr(stats, lock, "llm_fusion_cache_hits")
             return cached
 
-    result = llm_refine.fuse_transcripts(llm_client, model, rover_text, per_model_texts)
+    result = llm_refine.fuse_transcripts(
+        llm_client, model, rover_text, per_model_texts, system_prompt=system_prompt
+    )
     _incr(stats, lock, "llm_fusion_calls")
     if not result.get("accepted", False):
         _incr(stats, lock, "llm_fusion_rejected")
@@ -640,7 +660,8 @@ def process_one_file(
                 futures = [
                     (model_name, pool.submit(
                         get_or_clean, llm_client, args.llm_cleanup_model, model_name,
-                        dataset_root, wav_path, result.text, force=args.force, stats=stats, lock=lock,
+                        dataset_root, wav_path, result.text,
+                        system_prompt=args.cleanup_system_prompt, force=args.force, stats=stats, lock=lock,
                     ))
                     for model_name, result in cleanable
                 ]
@@ -653,7 +674,8 @@ def process_one_file(
         if combined["rover_text"]:
             fusion = get_or_fuse(
                 llm_client, args.llm_fusion_model, dataset_root, wav_path,
-                combined["rover_text"], per_model_clean_texts, force=args.force, stats=stats, lock=lock,
+                combined["rover_text"], per_model_clean_texts,
+                system_prompt=args.fusion_system_prompt, force=args.force, stats=stats, lock=lock,
             )
             final_text = fusion["final_text"]
 
@@ -685,6 +707,22 @@ def main(argv: Optional[list[str]] = None) -> None:
     dataset_root = Path(args.dataset_root).expanduser().resolve()
     if not dataset_root.is_dir():
         raise SystemExit(f"--dataset-root does not exist or is not a directory: {dataset_root}")
+
+    if args.llm_refine:
+        if args.language not in CLEANUP_PROMPTS_BY_LANGUAGE:
+            raise SystemExit(
+                f"--llm-refine has no cleanup/fusion prompt for --language {args.language!r} "
+                f"(only {sorted(CLEANUP_PROMPTS_BY_LANGUAGE)} are supported)."
+            )
+        args.cleanup_system_prompt = CLEANUP_PROMPTS_BY_LANGUAGE[args.language]
+        args.fusion_system_prompt = FUSION_PROMPTS_BY_LANGUAGE[args.language]
+
+    if args.translate and args.language != "vi":
+        raise SystemExit(
+            "--translate only supports --language vi (it calls llm_refine.translate_text(), "
+            "which is hardcoded VI->EN) -- for an EN-source pipeline, translate separately with "
+            "llm_refine.translate_text_en_vi() instead of rover.py's --translate."
+        )
 
     selected_models = [m.strip() for m in args.models.split(",") if m.strip()]
     clients = build_clients(selected_models)

@@ -1,14 +1,21 @@
-"""Turn crawled videos (raw wav + vi/en subtitles) into a segment-level
-(audio, text_en, text_vi) dataset -- no ASR, no LLM: both texts come
-directly from the video's own captions.
+"""Turn crawled videos (raw wav + vi/en subtitles) into segment-level audio
+clips, plus the video's own caption text for each segment as a reference
+hint -- NOT ground truth. Real (text_en, text_vi) ground truth is produced
+by a separate downstream pass (rover.py's ASR+ROVER+LLM-cleanup for
+text_en, then llm_refine.translate_text_en_vi() for text_vi), because the
+crawled EN/VI subtitle tracks are independently timed and drift against
+each other over a video's runtime -- joining them by raw time-overlap
+produced badly misaligned (audio, text_vi) pairs for anything more than a
+few segments into a video (verified: BLEU=0 pairs where the audio was a
+few words but the "ground truth" was a multi-sentence paragraph from
+elsewhere in the dialogue). The caption text is still useful downstream as
+a loose reference (style/terminology hint) for the LLM translation step,
+just not as ground truth on its own.
 
 Segmentation is driven by the English subtitle cues (merged up to a target
 duration), not by speaker diarization: the captions already mark exactly
-when speech happens. For each resulting segment window, the Vietnamese
-text is whatever Vietnamese cues overlap that same time range -- this is a
-time-overlap join, so the two languages' cue boundaries don't need to
-match. Each cut segment is then checked with the existing lang_id module
-(English-audio quality gate) before being kept.
+when speech happens. Each cut segment is checked with the existing lang_id
+module (English-audio quality gate) before being kept.
 
 Usage:
     python process_videos.py --raw-dir dataset/raw_audio --out-dir dataset/final
@@ -189,7 +196,6 @@ def process_one_video(
     stats = {
         "video_id": video_id,
         "candidate_segments": 0,
-        "dropped_missing_vi_text": 0,
         "dropped_lang_id_fail": 0,
         "kept": 0,
     }
@@ -226,11 +232,11 @@ def process_one_video(
         if seg_end - seg_start < min_seg_sec:
             continue
 
-        text_en = extract_overlapping_text(en_cues, seg_start, seg_end)
-        text_vi = extract_overlapping_text(vi_cues, seg_start, seg_end)
-        if not text_vi:
-            stats["dropped_missing_vi_text"] += 1
-            continue
+        # Reference hints only (not ground truth) -- see module docstring.
+        # A missing VI hint no longer drops the segment: text_vi now comes
+        # from a downstream LLM-translate pass, not from this overlap join.
+        text_en_caption = extract_overlapping_text(en_cues, seg_start, seg_end)
+        text_vi_caption_hint = extract_overlapping_text(vi_cues, seg_start, seg_end)
 
         seg_id = f"{video_id}_seg{idx:04d}"
         out_wav = out_dir / "audio" / video_id / f"{seg_id}.wav"
@@ -249,8 +255,8 @@ def process_one_video(
             "start": round(seg_start, 3),
             "end": round(seg_end, 3),
             "duration": round(seg_end - seg_start, 3),
-            "text_en": text_en,
-            "text_vi": text_vi,
+            "text_en_caption": text_en_caption,
+            "text_vi_caption_hint": text_vi_caption_hint,
             "audio_filepath": str(out_wav.relative_to(out_dir)),
             "source_url": source_url,
             "en_sub_ext": en_sub_path.suffix.lstrip("."),
@@ -333,7 +339,6 @@ def main(argv: Optional[list[str]] = None) -> None:
 
             print(
                 f"  candidates={stats['candidate_segments']} kept={stats.get('kept', 0)} "
-                f"dropped_missing_vi={stats.get('dropped_missing_vi_text', 0)} "
                 f"dropped_lang_id={stats.get('dropped_lang_id_fail', 0)}"
                 + (f"  ERROR: {stats['error']}" if "error" in stats else "")
             )
@@ -353,7 +358,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         "n_videos": len(merged_stats),
         "totals": {
             key: sum(s.get(key, 0) for s in merged_stats)
-            for key in ("candidate_segments", "dropped_missing_vi_text", "dropped_lang_id_fail", "kept")
+            for key in ("candidate_segments", "dropped_lang_id_fail", "kept")
         },
         "per_video": merged_stats,
         "run_at": datetime.now(timezone.utc).isoformat(),
