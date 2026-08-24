@@ -140,12 +140,12 @@ trong file generate_report.py, hàm này không tự sinh lại phần nhận x�
 
 ## 5. Chi phí & thời gian dịch (ước tính /1000 sample)
 
-Model: `gemini-3.1-flash-lite`. Giá tham khảo dùng để tính: `$0.125` / 1M input token, `$0.75` / 1M output token (sửa 2 hằng số này trong notebook nếu Google đổi giá hoặc đổi model).
+Model: `gemini-3.1-flash-lite`. Giá tham khảo dùng để tính: `$0.25` / 1M input token, `$1.50` / 1M output token — đây là **giá bậc trả phí chuẩn** (Google AI Studio), không phải giá Batch API (`$0.125`/`$0.75`, giảm 50%, chỉ áp dụng khi submit job bất đồng bộ qua `client.batches.create`). `translate_dataset.py` gọi `client.models.generate_content(...)` đồng bộ nên phải tính theo giá chuẩn (sửa 2 hằng số này trong notebook nếu Google đổi giá, đổi model, hoặc chuyển sang dùng Batch API thật).
 
 | Dataset | Sample dịch (lần chạy này) | Thời gian ước tính /1000 sample | Chi phí ước tính /1000 sample |
 |---|---|---|---|
-| MusicBench | 1000 | 3.3 phút | $0.2146 |
-| MusicQA | 1000 | 1.2 phút | $0.0643 |
+| MusicBench | 1000 | 3.3 phút | $0.4292 |
+| MusicQA | 1000 | 1.2 phút | $0.1286 |
 
 ### Ước tính cho 10 triệu sample
 
@@ -153,8 +153,8 @@ Model: `gemini-3.1-flash-lite`. Giá tham khảo dùng để tính: `$0.125` / 1
 
 | Dataset | Chi phí ước tính /10 triệu sample | Thời gian ước tính /10 triệu sample |
 |---|---|---|
-| MusicBench | $2,145.54 | 550.6 giờ |
-| MusicQA | $643.23 | 197.8 giờ |
+| MusicBench | $4,291.08 | 550.6 giờ |
+| MusicQA | $1,286.46 | 197.8 giờ |
 
 ## 6. Toàn bộ sample dịch lỗi
 
