@@ -231,16 +231,56 @@ def is_vietnamese_text(text: str, *, min_diacritic_ratio: float = 0.15) -> bool:
         return diacritic_words > 0
 
 
+SHORT_TEXT_CHARS = 40  # below this, ratio alone is too volatile to trust
+SHORT_TEXT_ABS_OVERHEAD_CHARS = 40
+
+
 def is_reasonable_length(source: str, target: str) -> bool:
     """Loose sanity check -- catches empty/truncated or wildly rambling
     output. Not a fidelity check (that's what QA-pair joint translation and
-    is_vietnamese_text are for)."""
+    is_vietnamese_text are for).
+
+    Pure ratio is unreliable for short source strings: a Vietnamese yes/no
+    question genuinely needs more characters than its terse English source
+    ("Is the audio ambient?" -> "Âm thanh này có phải là nhạc ambient
+    không?" -- correct, but already >2x longer just from the "có...
+    không?" question particles). For source text at or under
+    SHORT_TEXT_CHARS, fall back to an absolute-overhead allowance instead of
+    a ratio, so short strings aren't penalized for a fixed per-language
+    overhead that looks huge only because the ratio's denominator is tiny.
+    """
     if not source or not source.strip():
         return True
     if not target or not target.strip():
         return False
+
     ratio = len(target) / len(source)
-    return MIN_LEN_RATIO <= ratio <= MAX_LEN_RATIO
+    if ratio < MIN_LEN_RATIO:
+        return False  # never allow truncation/dropped-content, regardless of source length
+    if ratio <= MAX_LEN_RATIO:
+        return True
+    if len(source) <= SHORT_TEXT_CHARS:
+        return len(target) <= len(source) + SHORT_TEXT_ABS_OVERHEAD_CHARS
+    return False
+
+
+def _looks_like_term_list(text: str) -> bool:
+    """True for a short proper-noun/genre/instrument-name answer (or a
+    comma/slash-separated list of them), e.g. "Guitar.", "Techno.",
+    "Electronic, hard rock, metal, pop, progressive, rock" -- MusicQA has
+    many answers that are exactly this. Vietnamese has no native equivalent
+    for most music genre/instrument names and borrows them as-is, so these
+    are *correct* translations that legitimately stay in English -- not a
+    failed-translation signal. Detected structurally (short comma/slash-
+    separated segments) rather than via a hardcoded genre list, so it isn't
+    tied to any specific vocabulary."""
+    stripped = text.strip().rstrip(".")
+    if not stripped:
+        return False
+    parts = [p.strip() for p in re.split(r"[,/]", stripped) if p.strip()]
+    if not parts:
+        return False
+    return all(len(p.split()) <= 3 for p in parts)
 
 
 def validate_unit(unit: TranslationUnit, translated: dict[str, str]) -> Optional[str]:
@@ -251,7 +291,10 @@ def validate_unit(unit: TranslationUnit, translated: dict[str, str]) -> Optional
         target_text = translated[field_name]
         if not is_reasonable_length(source_text, target_text):
             return f"field '{field_name}': length ratio out of range"
-        if not is_vietnamese_text(target_text):
+        # A short genre/instrument-name-style answer is expected to stay in
+        # English -- skip the Vietnamese-language check for it rather than
+        # flagging a correct translation as "still English".
+        if not _looks_like_term_list(target_text) and not is_vietnamese_text(target_text):
             return f"field '{field_name}': output doesn't look like Vietnamese"
     return None
 

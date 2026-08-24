@@ -14,8 +14,8 @@ quả sau khi chạy xong để phát hiện xu hướng lỗi hệ thống nế
 
 | Tiêu chí | Cách kiểm tra | Xử lý khi fail |
 |---|---|---|
-| Vẫn là tiếng Anh | Ưu tiên đếm **tỉ lệ từ có dấu tiếng Việt** trước (câu ≤6 từ chỉ cần 1 từ có dấu; câu dài hơn cần ≥15% số từ có dấu) — tín hiệu này đáng tin hơn `langdetect` cho câu pha trộn nhiều thuật ngữ/tên riêng tiếng Anh có chủ đích (tên nhạc cụ, thể loại). Chỉ dùng `langdetect.detect() == "vi"` làm phương án dự phòng khi câu hoàn toàn không có dấu | Dịch lại riêng sample đó, tối đa `MAX_RETRIES` lần |
-| Tỉ lệ độ dài bất thường | `len(bản dịch) / len(bản gốc)` phải nằm trong `[0.3, 2.0]` — bắt các case rỗng/bị cắt/dịch lan man thêm nội dung | Dịch lại riêng sample đó |
+| Vẫn là tiếng Anh | Ưu tiên đếm **tỉ lệ từ có dấu tiếng Việt** trước (câu ≤6 từ chỉ cần 1 từ có dấu; câu dài hơn cần ≥15% số từ có dấu) — tín hiệu này đáng tin hơn `langdetect` cho câu pha trộn nhiều thuật ngữ/tên riêng tiếng Anh có chủ đích (tên nhạc cụ, thể loại). Chỉ dùng `langdetect.detect() == "vi"` làm phương án dự phòng khi câu hoàn toàn không có dấu. **Ngoại lệ**: `_looks_like_term_list()` bỏ qua hẳn bước này nếu câu trả lời là tên thể loại/nhạc cụ ngắn hoặc danh sách phân tách bằng dấu phẩy/gạch chéo, mỗi phần ≤3 từ (vd `"Guitar."`, `"Electronic, hard rock, metal"`) — tiếng Việt mượn nguyên các từ này nên giữ tiếng Anh là bản dịch **đúng**, không phải bỏ sót | Dịch lại riêng sample đó, tối đa `MAX_RETRIES` lần |
+| Tỉ lệ độ dài bất thường | `len(bản dịch) / len(bản gốc)` phải nằm trong `[0.3, 2.0]` — bắt các case rỗng/bị cắt/dịch lan man thêm nội dung. **Ngoại lệ cho câu gốc ngắn** (≤40 ký tự): chỉ nới lỏng giới hạn **trên** thành "dài hơn bản gốc tối đa 40 ký tự" (số tuyệt đối, không phải tỉ lệ) — vì câu hỏi Yes/No tiếng Việt (`"...có... không?"`) tự nhiên dài hơn hẳn bản tiếng Anh gốc dù dịch đúng; giới hạn **dưới** (chặn cắt cụt) không đổi trong mọi trường hợp | Dịch lại riêng sample đó |
 | Response JSON hỏng/thiếu id | Không `json.loads` được, hoặc id/field trả về không khớp với batch gửi đi | Tách batch, dịch lại từng sample riêng lẻ thay vì hỏng cả batch |
 | Câu hỏi và câu trả lời lệch nghĩa nhau | Không có bộ kiểm tra tự động (khó verify bằng rule đơn giản) — phòng ngừa bằng thiết kế: `question` + `answer` của cùng 1 sample luôn được gộp thành **1 "unit"**, dịch chung trong **cùng 1 lượt gọi Gemini** để model thấy cả hai và giữ ngữ cảnh nhất quán | N/A — đây là biện pháp phòng ngừa ở bước dịch, không phải bộ lọc hậu kiểm |
 
@@ -138,6 +138,16 @@ notebook), nhận thấy:
 | MusicBench | 1000 | 3.2 phút | $0.2146 |
 | MusicQA | 1000 | 1.4 phút | $0.0667 |
 
+### Ước tính cho 10 triệu sample
+
+*(Ngoại suy tuyến tính từ bảng /1000 sample ở trên — copy từ notebook mục
+"Bảng /10 triệu sample". Chỉ mang tính tham khảo thô, xem lưu ý ở mục 4.)*
+
+| Dataset | Chi phí ước tính /10 triệu sample | Thời gian ước tính /10 triệu sample |
+|---|---|---|
+| MusicBench | | |
+| MusicQA | | |
+
 ## 6. Toàn bộ sample dịch lỗi
 
 ### MusicBench -- sample dịch lỗi (0)
@@ -182,3 +192,28 @@ _Không có sample lỗi nào._
 - **sample_index=917** -- lỗi: field 'answer': output doesn't look like Vietnamese
   - `question` (EN gốc): What genre of music would combine elements of punkrock and techno?
   - `answer` (EN gốc): Cyberpunk.
+
+## 7. System prompt dùng để dịch
+
+System prompt gửi kèm mọi lệnh gọi Gemini (`SYSTEM_PROMPT` trong
+`translate_dataset.py`), áp dụng như nhau cho cả batch lẫn fallback từng
+sample riêng lẻ:
+
+```
+Bạn là công cụ dịch thuật tiếng Anh sang tiếng Việt cho dataset caption/hỏi-đáp
+về âm nhạc. Dịch chính xác, tự nhiên, giữ đúng ý nghĩa; thuật ngữ âm nhạc (tên
+nhạc cụ, thể loại, kỹ thuật chơi) dịch theo cách người Việt trong ngành nhạc
+thường dùng, không dịch máy móc từng chữ. Tên riêng (tên bài hát, nghệ sĩ, tên
+file) giữ nguyên không dịch.
+
+Đầu vào là một mảng JSON, mỗi phần tử có "id" và một hoặc nhiều field text cần
+dịch. Nếu một phần tử có nhiều field (ví dụ "question" và "answer"), các field
+đó thuộc cùng một đoạn hội thoại/ngữ cảnh -- PHẢI dịch sao cho chúng vẫn khớp
+nghĩa với nhau sau khi dịch (không được để câu hỏi hỏi một đằng, câu trả lời
+dịch thành nói chuyện khác).
+
+Trả về ĐÚNG một mảng JSON, cùng số phần tử, cùng "id", cùng tên field như đầu
+vào -- chỉ thay giá trị text bằng bản dịch tiếng Việt. Không thêm field, không
+bỏ field, không thêm giải thích, không dùng markdown code fence. Field rỗng thì
+giữ nguyên rỗng.
+```
