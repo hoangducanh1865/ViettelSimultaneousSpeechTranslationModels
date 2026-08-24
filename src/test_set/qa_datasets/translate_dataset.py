@@ -106,6 +106,11 @@ class TranslationResult:
     translated_fields: dict[str, str] = field(default_factory=dict)
     error: Optional[str] = None
     mode: str = "batched"  # "batched" | "fallback_single"
+    # Whatever the last parseable (but possibly rejected) translation attempt
+    # produced -- populated even when ok=False, so a failed sample's actual
+    # (bad) Gemini output can still be inspected later, not just its EN
+    # source and a category-string error reason.
+    attempted_fields: dict[str, str] = field(default_factory=dict)
 
 
 SYSTEM_PROMPT = """\
@@ -278,14 +283,22 @@ def _parse_response(response_text: str, units: list[TranslationUnit]) -> Optiona
 
 def translate_unit_single(
     client, model: str, unit: TranslationUnit, *, max_retries: int, usage_tracker: Optional[UsageTracker] = None,
+    initial_attempt: Optional[dict[str, str]] = None,
 ) -> TranslationResult:
     """Retries up to max_retries full attempts -- each one a fresh Gemini
     call -- as long as the *result* keeps failing validation (not just on
     API errors, which _call_gemini_json already retries internally). Gives
     the model repeated independent chances to get this one stubborn unit
-    right before giving up on it."""
+    right before giving up on it.
+
+    `initial_attempt`: an already-parsed-but-rejected translation from a
+    prior batch call for this same unit, if any -- kept as the reported
+    attempted_fields in case every retry here fails to even parse, so a
+    failed sample's actual (bad) output is never lost, just never accepted.
+    """
     prompt = _build_prompt([unit])
     last_error = "unknown error"
+    last_attempted = initial_attempt or {}
 
     for attempt in range(max_retries):
         try:
@@ -304,12 +317,15 @@ def translate_unit_single(
             continue
 
         translated = parsed[unit.sample_index]
+        last_attempted = translated
         reason = validate_unit(unit, translated)
         if reason is None:
             return TranslationResult(unit.sample_index, ok=True, translated_fields=translated, mode="fallback_single")
         last_error = reason
 
-    return TranslationResult(unit.sample_index, ok=False, error=last_error, mode="fallback_single")
+    return TranslationResult(
+        unit.sample_index, ok=False, error=last_error, mode="fallback_single", attempted_fields=last_attempted
+    )
 
 
 def translate_batch(
@@ -345,9 +361,14 @@ def translate_batch(
             results.append(TranslationResult(unit.sample_index, ok=True, translated_fields=translated))
         else:
             # Only this unit failed validation -- retry it alone, keep the
-            # rest of the batch's (valid) results as-is.
+            # rest of the batch's (valid) results as-is. Pass this batch
+            # attempt through as the fallback attempted_fields in case every
+            # single-unit retry fails to even parse.
             results.append(
-                translate_unit_single(client, model, unit, max_retries=max_retries, usage_tracker=usage_tracker)
+                translate_unit_single(
+                    client, model, unit, max_retries=max_retries, usage_tracker=usage_tracker,
+                    initial_attempt=translated,
+                )
             )
     return results
 
@@ -420,6 +441,7 @@ def translate_units(
                             "sample_index": r.sample_index,
                             "ok": r.ok,
                             "translated_fields": r.translated_fields,
+                            "attempted_fields": r.attempted_fields,
                             "error": r.error,
                             "mode": r.mode,
                         }, ensure_ascii=False) + "\n")
