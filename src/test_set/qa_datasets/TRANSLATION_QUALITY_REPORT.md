@@ -46,8 +46,6 @@ loại) để phát hiện xu hướng, không chỉ đọc vài sample đầu f
 
 ![Phân bố tỉ lệ độ dài bản dịch](length_ratio_distribution.png)
 
-![Phân loại lý do dịch lỗi](failure_reasons_breakdown.png)
-
 ## 3. Đánh giá định tính (đọc mẫu thủ công)
 
 Đã đọc thủ công một số sample của cả 2 dataset (xem mục "10. Kiểm tra nhanh
@@ -136,6 +134,8 @@ trong file generate_report.py, hàm này không tự sinh lại phần nhận x�
   thức từ Google Cloud Billing.
 
 ## 5. Chi phí & thời gian dịch (ước tính /1000 sample)
+
+Model: `gemini-3.1-flash-lite`. Giá tham khảo dùng để tính: `$0.125` / 1M input token, `$0.75` / 1M output token (sửa 2 hằng số này trong notebook nếu Google đổi giá hoặc đổi model).
 
 | Dataset | Sample dịch (lần chạy này) | Thời gian ước tính /1000 sample | Chi phí ước tính /1000 sample |
 |---|---|---|---|
