@@ -59,7 +59,7 @@ def load_json_or_jsonl(path):
 
 
 MIN_LEN_RATIO = 0.3
-MAX_LEN_RATIO = 3.5
+MAX_LEN_RATIO = 2.0
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 
@@ -68,6 +68,35 @@ _FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 class TranslationUnit:
     sample_index: int
     fields: dict[str, str]  # field_name -> source text (all translated together)
+
+
+@dataclass
+class UsageTracker:
+    """Accumulates token/latency totals across every Gemini call in one
+    translate_units() run (batch calls + any per-unit fallback retries) --
+    used to estimate $/1k samples and time/1k samples afterward."""
+
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    api_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_call_seconds: float = 0.0
+
+    def record(self, usage_metadata, elapsed_sec: float) -> None:
+        with self.lock:
+            self.api_calls += 1
+            self.total_call_seconds += elapsed_sec
+            if usage_metadata is not None:
+                self.input_tokens += getattr(usage_metadata, "prompt_token_count", None) or 0
+                self.output_tokens += getattr(usage_metadata, "candidates_token_count", None) or 0
+
+    def as_dict(self) -> dict:
+        return {
+            "api_calls": self.api_calls,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_call_seconds": round(self.total_call_seconds, 2),
+        }
 
 
 @dataclass
@@ -117,9 +146,12 @@ def _strip_fences(text: str) -> str:
     return _FENCE_RE.sub("", text.strip()).strip()
 
 
-def _call_gemini_json(client, model: str, user_content: str, *, max_output_tokens: int) -> str:
+def _call_gemini_json(
+    client, model: str, user_content: str, *, max_output_tokens: int, usage_tracker: Optional[UsageTracker] = None,
+) -> str:
     from google.genai import types
 
+    start = time.perf_counter()
     response = client.models.generate_content(
         model=model,
         contents=user_content,
@@ -129,14 +161,22 @@ def _call_gemini_json(client, model: str, user_content: str, *, max_output_token
             max_output_tokens=max_output_tokens,
         ),
     )
+    elapsed = time.perf_counter() - start
+    if usage_tracker is not None:
+        usage_tracker.record(getattr(response, "usage_metadata", None), elapsed)
     return (response.text or "").strip()
 
 
-def _call_with_retry(client, model: str, user_content: str, *, max_output_tokens: int, max_retries: int) -> str:
+def _call_with_retry(
+    client, model: str, user_content: str, *, max_output_tokens: int, max_retries: int,
+    usage_tracker: Optional[UsageTracker] = None,
+) -> str:
     last_error: Optional[Exception] = None
     for attempt in range(max_retries):
         try:
-            return _call_gemini_json(client, model, user_content, max_output_tokens=max_output_tokens)
+            return _call_gemini_json(
+                client, model, user_content, max_output_tokens=max_output_tokens, usage_tracker=usage_tracker
+            )
         except Exception as e:  # noqa: BLE001 -- transient API errors (429/5xx/timeout), retry all
             last_error = e
             if attempt < max_retries - 1:
@@ -144,28 +184,46 @@ def _call_with_retry(client, model: str, user_content: str, *, max_output_tokens
     raise RuntimeError(f"Gemini call failed after {max_retries} attempts: {last_error!r}")
 
 
-def is_vietnamese_text(text: str) -> bool:
+_VIETNAMESE_DIACRITIC_RE = re.compile(
+    r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡ"
+    r"ùúụủũưừứựửữỳýỵỷỹđ]", re.IGNORECASE,
+)
+
+
+def is_vietnamese_text(text: str, *, min_diacritic_ratio: float = 0.15) -> bool:
     """True if `text` looks like Vietnamese, used to catch translations that
     silently came back still in English (empty text is vacuously fine --
-    nothing to translate, not a failure)."""
+    nothing to translate, not a failure).
+
+    Diacritic presence is checked FIRST and treated as decisive when found:
+    it's a much more reliable signal than langdetect for this dataset, whose
+    Vietnamese text legitimately mixes in English loanwords/proper nouns on
+    purpose (instrument names, genre names, e.g. "một bản post-rock,
+    electronic"). langdetect alone tends to misclassify such short,
+    code-switched sentences as English. langdetect is only consulted as a
+    fallback when there's no diacritic evidence either way (e.g. a genuinely
+    accent-free short answer like "Piano.")."""
     if not text or not text.strip():
         return True
+
+    words = text.split()
+    diacritic_words = sum(1 for w in words if _VIETNAMESE_DIACRITIC_RE.search(w))
+
+    if len(words) <= 6:
+        # Short text: even a single diacritic word is strong enough evidence
+        # (a short Vietnamese question/answer may only have one such word).
+        if diacritic_words >= 1:
+            return True
+    elif diacritic_words / len(words) >= min_diacritic_ratio:
+        return True
+
     try:
         from langdetect import detect, DetectorFactory
 
         DetectorFactory.seed = 0  # deterministic
         return detect(text) == "vi"
     except Exception:
-        # langdetect unavailable or failed to classify (very short/ambiguous
-        # text) -- fall back to a crude but dependency-free signal: Vietnamese
-        # text almost always contains at least one diacritic character for
-        # anything longer than a couple of words.
-        vietnamese_chars = re.findall(
-            r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡ"
-            r"ùúụủũưừứựửữỳýỵỷỹđ]", text, flags=re.IGNORECASE,
-        )
-        word_count = len(text.split())
-        return word_count <= 2 or len(vietnamese_chars) > 0
+        return diacritic_words > 0
 
 
 def is_reasonable_length(source: str, target: str) -> bool:
@@ -218,7 +276,9 @@ def _parse_response(response_text: str, units: list[TranslationUnit]) -> Optiona
     return by_id
 
 
-def translate_unit_single(client, model: str, unit: TranslationUnit, *, max_retries: int) -> TranslationResult:
+def translate_unit_single(
+    client, model: str, unit: TranslationUnit, *, max_retries: int, usage_tracker: Optional[UsageTracker] = None,
+) -> TranslationResult:
     """Retries up to max_retries full attempts -- each one a fresh Gemini
     call -- as long as the *result* keeps failing validation (not just on
     API errors, which _call_gemini_json already retries internally). Gives
@@ -229,7 +289,9 @@ def translate_unit_single(client, model: str, unit: TranslationUnit, *, max_retr
 
     for attempt in range(max_retries):
         try:
-            response_text = _call_gemini_json(client, model, prompt, max_output_tokens=2048)
+            response_text = _call_gemini_json(
+                client, model, prompt, max_output_tokens=2048, usage_tracker=usage_tracker
+            )
         except Exception as e:
             last_error = repr(e)
             if attempt < max_retries - 1:
@@ -252,13 +314,15 @@ def translate_unit_single(client, model: str, unit: TranslationUnit, *, max_retr
 
 def translate_batch(
     client, model: str, units: list[TranslationUnit], *, max_output_tokens_per_unit: int, max_retries: int,
+    usage_tracker: Optional[UsageTracker] = None,
 ) -> list[TranslationResult]:
     prompt = _build_prompt(units)
     max_output_tokens = max(2048, max_output_tokens_per_unit * len(units))
 
     try:
         response_text = _call_with_retry(
-            client, model, prompt, max_output_tokens=max_output_tokens, max_retries=max_retries
+            client, model, prompt, max_output_tokens=max_output_tokens, max_retries=max_retries,
+            usage_tracker=usage_tracker,
         )
         parsed = _parse_response(response_text, units)
     except Exception:
@@ -268,7 +332,10 @@ def translate_batch(
         # Whole batch came back malformed/mismatched -- no reliable way to
         # tell which units are actually fine, so retry every one alone
         # rather than guessing.
-        return [translate_unit_single(client, model, u, max_retries=max_retries) for u in units]
+        return [
+            translate_unit_single(client, model, u, max_retries=max_retries, usage_tracker=usage_tracker)
+            for u in units
+        ]
 
     results = []
     for unit in units:
@@ -279,7 +346,9 @@ def translate_batch(
         else:
             # Only this unit failed validation -- retry it alone, keep the
             # rest of the batch's (valid) results as-is.
-            results.append(translate_unit_single(client, model, unit, max_retries=max_retries))
+            results.append(
+                translate_unit_single(client, model, unit, max_retries=max_retries, usage_tracker=usage_tracker)
+            )
     return results
 
 
@@ -313,6 +382,12 @@ def translate_units(
 
     Each output line: {"sample_index": int, "ok": bool,
     "translated_fields": {...}, "error": str|None, "mode": str}.
+
+    Returned stats include "usage" (total tokens/API-call-seconds summed
+    across every call this run made) and "wall_clock_seconds" (actual
+    elapsed time for the whole run, which is shorter than the summed
+    per-call time thanks to --max-workers concurrency) -- use these to
+    estimate cost and throughput per 1k samples.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     done = set() if force else load_processed_indices(output_path)
@@ -323,6 +398,8 @@ def translate_units(
     batches = [pending[i : i + batch_size] for i in range(0, len(pending), batch_size)]
     stats = {"kept": 0, "failed": 0}
     lock = threading.Lock()
+    usage_tracker = UsageTracker()
+    run_start = time.perf_counter()
 
     with open(output_path, "a", encoding="utf-8") as out_f:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -330,6 +407,7 @@ def translate_units(
                 pool.submit(
                     translate_batch, client, model, batch,
                     max_output_tokens_per_unit=max_output_tokens_per_unit, max_retries=max_retries,
+                    usage_tracker=usage_tracker,
                 ): batch
                 for batch in batches
             }
@@ -351,6 +429,9 @@ def translate_units(
                     print(f"  batch {n_done_batches}/{len(batches)} done "
                           f"(kept={stats['kept']}, failed={stats['failed']})")
 
+    stats["usage"] = usage_tracker.as_dict()
+    stats["wall_clock_seconds"] = round(time.perf_counter() - run_start, 2)
+    stats["n_processed"] = len(pending)
     return stats
 
 
