@@ -43,6 +43,19 @@ DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_MAX_WORKERS = 4
 DEFAULT_MAX_RETRIES = 3
+
+
+def load_json_or_jsonl(path):
+    """Some HF dataset exports use a `.json` extension but are actually
+    JSON Lines (one object per line) rather than a single JSON array --
+    MusicBench_train.json is one such case. Try a normal whole-file parse
+    first, fall back to line-by-line JSONL on failure."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
 MIN_LEN_RATIO = 0.3
 MAX_LEN_RATIO = 3.5
 
