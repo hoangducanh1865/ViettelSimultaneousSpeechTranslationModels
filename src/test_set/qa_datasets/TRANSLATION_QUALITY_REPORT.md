@@ -40,7 +40,7 @@ loại) để phát hiện xu hướng, không chỉ đọc vài sample đầu f
 | Dataset | Tổng sample đã thử dịch | Dịch OK | Dịch lỗi (đã loại) | Tỉ lệ thành công |
 |---|---|---|---|---|
 | MusicBench | 1000 | 1000 | 0 | 100.0% |
-| MusicQA | 1000 | 988 | 12 | 98.8% |
+| MusicQA | 1000 | 1000 | 0 | 100.0% |
 
 ![Tỉ lệ dịch thành công theo dataset](translation_success_rate.png)
 
@@ -78,19 +78,23 @@ notebook), nhận thấy:
 - Độ dài và mức chi tiết bản dịch tương xứng bản gốc ở cả 6 mẫu, không thấy
   dấu hiệu cắt cụt hay hallucinate thêm nội dung không có trong câu gốc.
 
+*(Nhận xét định tính này viết dựa trên lần đọc mẫu gần nhất -- nếu chất lượng
+dịch thay đổi rõ rệt ở lần chạy mới, nên xem lại/viết lại đoạn này thủ công
+trong file generate_report.py, hàm này không tự sinh lại phần nhận xét.)*
+
 **MusicBench**
 
 > EN: This mellow instrumental track showcases a dominant electric guitar that opens with a descending riff, followed by arpeggiated chords, hammer-ons, and a slide. The percussion section keeps it simple with rim shots and a common time count, while the bass adds a single note on the first beat of every bar. Minimalist piano chords round out the song while leaving space for the guitar to shine. There are no vocals, making it perfect for a coffee shop or some chill background music. The key is in E major, with a chord progression that centers around that key and a straightforward 4/4 time signature.
 >
-> VI: Bản nhạc không lời êm dịu này làm nổi bật tiếng guitar điện chủ đạo, mở đầu bằng một đoạn riff đi xuống, theo sau là các hợp âm rải (arpeggio), kỹ thuật hammer-on và slide. Phần bộ gõ giữ nhịp đơn giản với tiếng rim shot và nhịp 4/4, trong khi tiếng bass chỉ đánh một nốt vào phách đầu của mỗi ô nhịp. Những hợp âm piano tối giản làm tròn trịa bài hát, để lại khoảng trống cho tiếng guitar tỏa sáng. Bài hát không có giọng hát, rất phù hợp cho quán cà phê hoặc làm nhạc nền thư giãn. Bài hát ở giọng Mi trưởng (E major), với vòng hợp âm xoay quanh giọng này và nhịp 4/4 thẳng thắn.
+> VI: Bản nhạc không lời êm dịu này làm nổi bật cây guitar điện chủ đạo, mở đầu bằng một đoạn riff đi xuống, theo sau là các hợp âm rải (arpeggio), kỹ thuật hammer-on và slide. Phần bộ gõ giữ nhịp đơn giản với tiếng rim shot và nhịp 4/4, trong khi tiếng bass thêm vào một nốt duy nhất ở phách đầu mỗi ô nhịp. Những hợp âm piano tối giản làm tròn trịa bài hát, để lại khoảng trống cho tiếng guitar tỏa sáng. Bài hát không có giọng hát, rất phù hợp cho quán cà phê hoặc làm nhạc nền thư giãn. Bài hát ở giọng Mi trưởng (E major), với vòng hợp âm xoay quanh giọng này và nhịp 4/4 đơn giản.
 
 > EN: This relaxing song is perfect for a coffee shop setting. With no vocals, the electric guitar takes the lead, starting with a descending run before moving into an arpeggiated chord and double stop hammer-on to a higher note. A descending slide follows, along with a chord run while the simple percussion keeps time with rim shots. The bass plays a single note on the first count of each bar while the piano provides backing chords. All of this comes together in common time, with a beat of four that will create a laid-back atmosphere.
 >
-> VI: Bài hát thư giãn này rất phù hợp với không gian quán cà phê. Không có giọng hát, guitar điện đóng vai trò dẫn dắt, bắt đầu bằng một đoạn chạy nốt đi xuống trước khi chuyển sang hợp âm rải và kỹ thuật double stop hammer-on lên nốt cao hơn. Tiếp theo là một cú slide đi xuống cùng một đoạn chạy hợp âm, trong khi bộ gõ đơn giản giữ nhịp bằng tiếng rim shot. Bass chơi một nốt ở phách đầu mỗi ô nhịp trong khi piano cung cấp các hợp âm đệm. Tất cả hòa quyện trong nhịp 4/4, với nhịp đếm 4 tạo nên một bầu không khí thoải mái.
+> VI: Bản nhạc thư giãn này rất hoàn hảo cho không gian quán cà phê. Không có giọng hát, guitar điện đóng vai trò dẫn dắt, bắt đầu bằng một đoạn chạy nốt đi xuống trước khi chuyển sang hợp âm rải và kỹ thuật double stop hammer-on lên nốt cao hơn. Tiếp theo là một cú slide đi xuống cùng một đoạn chạy hợp âm, trong khi bộ gõ đơn giản giữ nhịp bằng tiếng rim shot. Bass chơi một nốt duy nhất ở phách đầu mỗi ô nhịp, trong khi piano cung cấp các hợp âm đệm. Tất cả hòa quyện trong nhịp 4/4, với nhịp đếm 4 tạo nên bầu không khí thoải mái.
 
 > EN: This laid-back instrumental track is perfect for a coffee shop ambiance. Featuring an electric guitar as the primary instrument, the song begins with a descending run followed by an arpeggiated chord and a hammer-on to a higher note. The percussion provides a simple beat with rim shots while the bass hits only one note on the first count of each bar. The piano plays backing chords as the guitar continues with a descending slide and chord run. There are no vocals, allowing for a relaxing and chill mood. The song is in common time with a chord progression of E and a 4-count beat.
 >
-> VI: Bản nhạc không lời thoải mái này rất phù hợp cho không gian quán cà phê. Với guitar điện là nhạc cụ chính, bài hát bắt đầu bằng một đoạn chạy nốt đi xuống, theo sau là hợp âm rải và kỹ thuật hammer-on lên nốt cao hơn. Bộ gõ cung cấp nhịp điệu đơn giản với tiếng rim shot, trong khi bass chỉ đánh một nốt ở phách đầu mỗi ô nhịp. Piano chơi các hợp âm đệm khi guitar tiếp tục với một cú slide đi xuống và đoạn chạy hợp âm. Không có giọng hát, tạo nên tâm trạng thư giãn và chill. Bài hát ở nhịp 4/4 với vòng hợp âm E và nhịp đếm 4.
+> VI: Bản nhạc không lời thư thái này rất phù hợp với không gian quán cà phê. Với guitar điện là nhạc cụ chính, bài hát bắt đầu bằng một đoạn chạy nốt đi xuống, theo sau là hợp âm rải và kỹ thuật hammer-on lên nốt cao hơn. Bộ gõ cung cấp nhịp điệu đơn giản với tiếng rim shot, trong khi bass chỉ đánh một nốt ở phách đầu mỗi ô nhịp. Piano chơi các hợp âm đệm khi guitar tiếp tục với cú slide đi xuống và đoạn chạy hợp âm. Không có giọng hát, tạo nên tâm trạng thư giãn và chill. Bài hát ở nhịp 4/4 với vòng hợp âm E và nhịp đếm 4.
 
 
 **MusicQA**
@@ -105,13 +109,13 @@ notebook), nhận thấy:
 > Q (VI): Mô tả chi tiết đoạn âm thanh
 >
 > A (EN): The audio is a blend of post-rock and electronic experimental sounds, with a heavy emphasis on drums and bass. The track features a variety of instrumentation, including guitar, synthesizers, and samples. The overall sound is raw and experimental, with a strong emphasis on atmosphere and mood.
-> A (VI): Đoạn âm thanh là sự pha trộn giữa post-rock và âm hưởng electronic experimental, với điểm nhấn mạnh vào trống và bass. Bản nhạc sử dụng đa dạng nhạc cụ bao gồm guitar, synthesizer và các đoạn sample. Âm thanh tổng thể mang tính thô mộc và thử nghiệm, chú trọng nhiều vào không gian và cảm xúc.
+> A (VI): Đoạn âm thanh là sự pha trộn giữa post-rock và âm hưởng electronic experimental, với điểm nhấn mạnh vào trống và bass. Bản nhạc sử dụng đa dạng nhạc cụ bao gồm guitar, synthesizer và các đoạn sample. Âm thanh tổng thể mang tính mộc mạc và thử nghiệm, tập trung mạnh vào bầu không khí và cảm xúc.
 
 > Q (EN): What do you hear in the audio?
 > Q (VI): Bạn nghe thấy gì trong đoạn âm thanh?
 >
 > A (EN): The audio is a mix of distorted guitar riffs, electronic samples, and experimental sounds. The drums and bass are heavily distorted, creating a raw and aggressive sound. The track features a variety of samples, including snippets of dialogue and sound effects. The overall sound is experimental and unpredictable, with a strong emphasis on atmosphere and mood.
-> A (VI): Đoạn âm thanh là sự kết hợp giữa các đoạn riff guitar bị méo tiếng (distorted), các đoạn sample điện tử và những âm thanh thử nghiệm. Tiếng trống và bass bị méo tiếng mạnh, tạo nên chất âm thô ráp và đầy gai góc. Bản nhạc sử dụng nhiều sample, bao gồm cả các đoạn hội thoại và hiệu ứng âm thanh. Âm thanh tổng thể mang tính thử nghiệm và khó đoán, với sự chú trọng mạnh mẽ vào bầu không khí và tâm trạng.
+> A (VI): Đoạn âm thanh là sự kết hợp của các đoạn riff guitar bị méo tiếng (distorted), các đoạn sample điện tử và những âm thanh thử nghiệm. Trống và bass được xử lý méo tiếng mạnh, tạo nên chất âm thô ráp và đầy uy lực. Bản nhạc sử dụng nhiều sample, bao gồm cả các đoạn hội thoại và hiệu ứng âm thanh. Âm thanh tổng thể mang tính thử nghiệm và khó đoán, với sự chú trọng lớn vào bầu không khí và cảm xúc.
 
 ## 4. Hạn chế đã biết
 
@@ -135,18 +139,17 @@ notebook), nhận thấy:
 
 | Dataset | Sample dịch (lần chạy này) | Thời gian ước tính /1000 sample | Chi phí ước tính /1000 sample |
 |---|---|---|---|
-| MusicBench | 1000 | 3.2 phút | $0.2146 |
-| MusicQA | 1000 | 1.4 phút | $0.0667 |
+| MusicBench | 1000 | 3.3 phút | $0.2146 |
+| MusicQA | 1000 | 1.2 phút | $0.0643 |
 
 ### Ước tính cho 10 triệu sample
 
-*(Ngoại suy tuyến tính từ bảng /1000 sample ở trên — copy từ notebook mục
-"Bảng /10 triệu sample". Chỉ mang tính tham khảo thô, xem lưu ý ở mục 4.)*
+*(Ngoại suy tuyến tính từ bảng /1000 sample ở trên. Chỉ mang tính tham khảo thô, xem lưu ý ở mục 4.)*
 
 | Dataset | Chi phí ước tính /10 triệu sample | Thời gian ước tính /10 triệu sample |
 |---|---|---|
-| MusicBench | | |
-| MusicQA | | |
+| MusicBench | $2,145.54 | 550.6 giờ |
+| MusicQA | $643.23 | 197.8 giờ |
 
 ## 6. Toàn bộ sample dịch lỗi
 
@@ -154,44 +157,9 @@ notebook), nhận thấy:
 
 _Không có sample lỗi nào._
 
-### MusicQA -- sample dịch lỗi (12)
+### MusicQA -- sample dịch lỗi (0)
 
-- **sample_index=216** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): Describe the audio
-  - `answer` (EN gốc): Electronic, hardrock, metal, pop, progressive, rock
-- **sample_index=314** -- lỗi: field 'question': length ratio out of range
-  - `question` (EN gốc): Is the audio psychedelic?
-  - `answer` (EN gốc): No, the audio is not psychedelic.
-- **sample_index=753** -- lỗi: field 'question': length ratio out of range
-  - `question` (EN gốc): Is the audio ambient?
-  - `answer` (EN gốc): Yes, the audio is ambient.
-- **sample_index=859** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What genre of music is "calm" in this list of tags?
-  - `answer` (EN gốc): Instrumentalpop.
-- **sample_index=860** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What type of instrument is featured in this audio?
-  - `answer` (EN gốc): Guitar.
-- **sample_index=861** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What mood or emotion does the music evoke?
-  - `answer` (EN gốc): Blues.
-- **sample_index=862** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): Is this a solo or a group performance?
-  - `answer` (EN gốc): Solo.
-- **sample_index=913** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What genre of music is characterized by a breakbeat and electronic elements?
-  - `answer` (EN gốc): Techno.
-- **sample_index=914** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What type of punkrock song would feature heavy bass and drums?
-  - `answer` (EN gốc): Breakbeat punk.
-- **sample_index=915** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What style of music combines elements of electronic and punkrock?
-  - `answer` (EN gốc): Synthpunk.
-- **sample_index=916** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What type of electronic music would feature a heavy beat and drums?
-  - `answer` (EN gốc): Breakbeat electronic.
-- **sample_index=917** -- lỗi: field 'answer': output doesn't look like Vietnamese
-  - `question` (EN gốc): What genre of music would combine elements of punkrock and techno?
-  - `answer` (EN gốc): Cyberpunk.
+_Không có sample lỗi nào._
 
 ## 7. System prompt dùng để dịch
 
@@ -200,20 +168,9 @@ System prompt gửi kèm mọi lệnh gọi Gemini (`SYSTEM_PROMPT` trong
 sample riêng lẻ:
 
 ```
-Bạn là công cụ dịch thuật tiếng Anh sang tiếng Việt cho dataset caption/hỏi-đáp
-về âm nhạc. Dịch chính xác, tự nhiên, giữ đúng ý nghĩa; thuật ngữ âm nhạc (tên
-nhạc cụ, thể loại, kỹ thuật chơi) dịch theo cách người Việt trong ngành nhạc
-thường dùng, không dịch máy móc từng chữ. Tên riêng (tên bài hát, nghệ sĩ, tên
-file) giữ nguyên không dịch.
+Bạn là công cụ dịch thuật tiếng Anh sang tiếng Việt cho dataset caption/hỏi-đáp về âm nhạc. Dịch chính xác, tự nhiên, giữ đúng ý nghĩa; thuật ngữ âm nhạc (tên nhạc cụ, thể loại, kỹ thuật chơi) dịch theo cách người Việt trong ngành nhạc thường dùng, không dịch máy móc từng chữ. Tên riêng (tên bài hát, nghệ sĩ, tên file) giữ nguyên không dịch.
 
-Đầu vào là một mảng JSON, mỗi phần tử có "id" và một hoặc nhiều field text cần
-dịch. Nếu một phần tử có nhiều field (ví dụ "question" và "answer"), các field
-đó thuộc cùng một đoạn hội thoại/ngữ cảnh -- PHẢI dịch sao cho chúng vẫn khớp
-nghĩa với nhau sau khi dịch (không được để câu hỏi hỏi một đằng, câu trả lời
-dịch thành nói chuyện khác).
+Đầu vào là một mảng JSON, mỗi phần tử có "id" và một hoặc nhiều field text cần dịch. Nếu một phần tử có nhiều field (ví dụ "question" và "answer"), các field đó thuộc cùng một đoạn hội thoại/ngữ cảnh -- PHẢI dịch sao cho chúng vẫn khớp nghĩa với nhau sau khi dịch (không được để câu hỏi hỏi một đằng, câu trả lời dịch thành nói chuyện khác).
 
-Trả về ĐÚNG một mảng JSON, cùng số phần tử, cùng "id", cùng tên field như đầu
-vào -- chỉ thay giá trị text bằng bản dịch tiếng Việt. Không thêm field, không
-bỏ field, không thêm giải thích, không dùng markdown code fence. Field rỗng thì
-giữ nguyên rỗng.
+Trả về ĐÚNG một mảng JSON, cùng số phần tử, cùng "id", cùng tên field như đầu vào -- chỉ thay giá trị text bằng bản dịch tiếng Việt. Không thêm field, không bỏ field, không thêm giải thích, không dùng markdown code fence. Field rỗng thì giữ nguyên rỗng.
 ```
