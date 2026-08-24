@@ -166,6 +166,30 @@ def extract_overlapping_text(cues: list[Cue], seg_start: float, seg_end: float) 
     return _dedupe_join(overlapping)
 
 
+def extract_context_window_text(
+    cues: list[Cue], seg_start: float, seg_end: float, *, pad_sec: float,
+) -> str:
+    """Wider than extract_overlapping_text: gathers every cue within
+    [seg_start - pad_sec, seg_end + pad_sec], not just cues strictly
+    overlapping the segment itself.
+
+    Used for the Vietnamese caption reference handed to the LLM translate
+    step -- a strict-overlap join is fragile against EN/VI subtitle-track
+    timing drift (the two tracks are independently timed and drift apart
+    over a video's runtime, so the *correct* VI cue for a given segment
+    can sit outside its own [start, end] window entirely, or a wrong cue
+    can be the only one technically overlapping). Padding the window makes
+    it much more likely the correct passage is present *somewhere* in the
+    text, and the LLM prompt explicitly asks the model to locate and use
+    only the relevant part -- this is a reference passage to search, not a
+    precise answer to copy.
+    """
+    window_start = seg_start - pad_sec
+    window_end = seg_end + pad_sec
+    nearby = [c.text for c in cues if c.start < window_end and c.end > window_start]
+    return _dedupe_join(nearby)
+
+
 def cut_and_check_segment(
     audio, sr: int, seg_start: float, seg_end: float, out_path: Path,
 ) -> dict:
@@ -191,6 +215,7 @@ def process_one_video(
     *,
     target_max_sec: float,
     min_seg_sec: float,
+    vi_context_pad_sec: float = 45.0,
     source_url: Optional[str] = None,
 ) -> tuple[list[dict], dict]:
     stats = {
@@ -235,8 +260,14 @@ def process_one_video(
         # Reference hints only (not ground truth) -- see module docstring.
         # A missing VI hint no longer drops the segment: text_vi now comes
         # from a downstream LLM-translate pass, not from this overlap join.
+        # text_vi_caption_context uses a padded window (not strict overlap):
+        # the LLM translate step is told to search it for the relevant
+        # part, which tolerates EN/VI subtitle-track timing drift far
+        # better than requiring an exact time match up front.
         text_en_caption = extract_overlapping_text(en_cues, seg_start, seg_end)
-        text_vi_caption_hint = extract_overlapping_text(vi_cues, seg_start, seg_end)
+        text_vi_caption_context = extract_context_window_text(
+            vi_cues, seg_start, seg_end, pad_sec=vi_context_pad_sec
+        )
 
         seg_id = f"{video_id}_seg{idx:04d}"
         out_wav = out_dir / "audio" / video_id / f"{seg_id}.wav"
@@ -256,7 +287,7 @@ def process_one_video(
             "end": round(seg_end, 3),
             "duration": round(seg_end - seg_start, 3),
             "text_en_caption": text_en_caption,
-            "text_vi_caption_hint": text_vi_caption_hint,
+            "text_vi_caption_context": text_vi_caption_context,
             "audio_filepath": str(out_wav.relative_to(out_dir)),
             "source_url": source_url,
             "en_sub_ext": en_sub_path.suffix.lstrip("."),
@@ -295,6 +326,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--target-max-sec", type=float, default=20.0)
     parser.add_argument("--min-seg-sec", type=float, default=1.5)
+    parser.add_argument(
+        "--vi-context-pad-sec", type=float, default=45.0,
+        help="How far before/after a segment's own window to pull Vietnamese caption "
+        "cues from for text_vi_caption_context (default: 45s each side). Wider than "
+        "the segment itself on purpose -- absorbs EN/VI subtitle-track timing drift; "
+        "the LLM translate step searches this passage rather than trusting it verbatim.",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Only process the first N videos (smoke testing)")
     parser.add_argument("--force", action="store_true", help="Reprocess videos even if already in processed_videos.json")
     args = parser.parse_args(argv)
@@ -328,6 +366,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             rows, stats = process_one_video(
                 video_id, wav_by_id[video_id], args.out_dir,
                 target_max_sec=args.target_max_sec, min_seg_sec=args.min_seg_sec,
+                vi_context_pad_sec=args.vi_context_pad_sec,
             )
             for row in rows:
                 manifest_f.write(json.dumps(row, ensure_ascii=False) + "\n")
