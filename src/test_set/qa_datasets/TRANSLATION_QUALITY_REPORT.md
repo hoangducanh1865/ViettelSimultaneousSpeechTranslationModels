@@ -4,6 +4,11 @@ Báo cáo mô tả cách đánh giá chất lượng bản dịch tự động (
 `translate_dataset.py`) cho 2 dataset `MusicBench` (caption nhạc) và `MusicQA`
 (hỏi-đáp về nhạc), và thống kê kết quả trên dữ liệu đã dịch.
 
+- Dataset gốc:
+  - MusicBench (amaai-lab): https://huggingface.co/datasets/amaai-lab/MusicBench
+  - MusicQA (mu-llama): https://huggingface.co/datasets/mu-llama/MusicQA
+- Dataset đã dịch (Google Drive): https://drive.google.com/drive/folders/1mTzcgwhNvdBHLQZxL8DGylwEeGIiIdFc?usp=sharing
+
 ## 1. Tiêu chí đánh giá
 
 Chất lượng được kiểm tra ở 2 lớp: **lúc dịch** (tự động loại sample lỗi ngay
