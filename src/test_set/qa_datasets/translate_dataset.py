@@ -56,6 +56,8 @@ def load_json_or_jsonl(path):
         return json.loads(text)
     except json.JSONDecodeError:
         return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
 MIN_LEN_RATIO = 0.3
 MAX_LEN_RATIO = 3.5
 
