@@ -202,20 +202,32 @@ def build_report_markdown(
     mb_failed: list[dict],
     mq_failed: list[dict],
     system_prompt: str,
+    model: str,
+    price_per_1m_input_tokens_usd: float,
+    price_per_1m_output_tokens_usd: float,
     n_samples_for_report: int = 3,
 ) -> str:
+    has_any_failure = bool(mb_failed) or bool(mq_failed)
+    failure_chart_line = (
+        "\n\n![Phân loại lý do dịch lỗi](failure_reasons_breakdown.png)" if has_any_failure else ""
+    )
+
     return "\n\n".join([
         REPORT_HEADER_AND_SECTION1,
         "## 2. Thống kê trên dữ liệu đã dịch\n\n"
         + render_stats_table(mb_quality, mq_quality)
         + "\n\n![Tỉ lệ dịch thành công theo dataset](translation_success_rate.png)"
           "\n\n![Phân bố tỉ lệ độ dài bản dịch](length_ratio_distribution.png)"
-          "\n\n![Phân loại lý do dịch lỗi](failure_reasons_breakdown.png)",
+        + failure_chart_line,
         "## 3. Đánh giá định tính (đọc mẫu thủ công)\n\n"
         + SECTION_3_NARRATIVE + "\n\n"
         + render_sample_blocks(mb_merged, mq_merged, n_samples_for_report),
         SECTION_4_LIMITATIONS,
         "## 5. Chi phí & thời gian dịch (ước tính /1000 sample)\n\n"
+        f"Model: `{model}`. Giá tham khảo dùng để tính: "
+        f"`${price_per_1m_input_tokens_usd}` / 1M input token, "
+        f"`${price_per_1m_output_tokens_usd}` / 1M output token "
+        "(sửa 2 hằng số này trong notebook nếu Google đổi giá hoặc đổi model).\n\n"
         + render_cost_time_table(mb_cost_time, mq_cost_time)
         + "\n\n### Ước tính cho 10 triệu sample\n\n"
           "*(Ngoại suy tuyến tính từ bảng /1000 sample ở trên. Chỉ mang tính "
