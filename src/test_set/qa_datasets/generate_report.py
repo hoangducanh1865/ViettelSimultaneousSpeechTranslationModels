@@ -16,6 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+ORIGINAL_DATASET_LINKS = {
+    "MusicBench (amaai-lab)": "https://huggingface.co/datasets/amaai-lab/MusicBench",
+    "MusicQA (mu-llama)": "https://huggingface.co/datasets/mu-llama/MusicQA",
+}
+TRANSLATED_DATASET_LINK = "https://drive.google.com/drive/folders/1mTzcgwhNvdBHLQZxL8DGylwEeGIiIdFc?usp=sharing"
+
 
 def render_stats_table(mb_quality: dict, mq_quality: dict) -> str:
     rows = [
@@ -101,11 +107,17 @@ def render_failed_section(name: str, failed: list[dict]) -> str:
     return "\n".join(lines)
 
 
-REPORT_HEADER_AND_SECTION1 = """# Báo cáo chất lượng dịch EN → VI (MusicBench, MusicQA)
+_dataset_links = "\n".join(f"  - {name}: {url}" for name, url in ORIGINAL_DATASET_LINKS.items())
+
+REPORT_HEADER_AND_SECTION1 = f"""# Báo cáo chất lượng dịch EN → VI (MusicBench, MusicQA)
 
 Báo cáo mô tả cách đánh giá chất lượng bản dịch tự động (Gemini/Vertex AI, qua
 `translate_dataset.py`) cho 2 dataset `MusicBench` (caption nhạc) và `MusicQA`
 (hỏi-đáp về nhạc), và thống kê kết quả trên dữ liệu đã dịch.
+
+- Dataset gốc:
+{_dataset_links}
+- Dataset đã dịch (Google Drive): {TRANSLATED_DATASET_LINK}
 
 ## 1. Tiêu chí đánh giá
 
