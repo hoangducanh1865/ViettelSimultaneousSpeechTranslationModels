@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!src/labeling_app/frontend/lib/
 lib64/
 parts/
 sdist/
