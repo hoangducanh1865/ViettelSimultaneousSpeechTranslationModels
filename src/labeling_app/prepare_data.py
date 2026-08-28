@@ -44,6 +44,8 @@ def main():
 
     seed_rows = []
     n_missing_audio = 0
+    n_copied = 0
+    n_skipped = 0
 
     with open(manifest_path, encoding="utf-8") as f:
         for line in f:
@@ -55,7 +57,17 @@ def main():
                 continue
 
             audio_filename = sanitize_filename(row["id"])
-            shutil.copyfile(src_audio, audio_out_dir / audio_filename)
+            dest_audio = audio_out_dir / audio_filename
+
+            # Bỏ qua copy nếu đích đã tồn tại và cùng kích thước với nguồn -- audio
+            # không đổi giữa các lần chạy (chỉ mỗi ASR/dịch trong manifest.jsonl đổi),
+            # nên copy lại toàn bộ mỗi lần chạy là lãng phí I/O (cả nguồn lẫn đích đều
+            # có thể nằm trên Drive, copy lại hàng nghìn file tốn hàng chục phút oan).
+            if not (dest_audio.exists() and dest_audio.stat().st_size == src_audio.stat().st_size):
+                shutil.copyfile(src_audio, dest_audio)
+                n_copied += 1
+            else:
+                n_skipped += 1
 
             seed_rows.append({
                 "id": row["id"],
@@ -74,7 +86,7 @@ def main():
     with open(seed_out_path, "w", encoding="utf-8") as f:
         json.dump(seed_rows, f, ensure_ascii=False, indent=2)
 
-    print(f"\nĐã copy {len(seed_rows)} file audio vào {audio_out_dir}")
+    print(f"\nĐã copy {n_copied} file audio mới, bỏ qua {n_skipped} file đã có sẵn (đích: {audio_out_dir})")
     print(f"Đã ghi {seed_out_path}")
     if n_missing_audio:
         print(f"CẢNH BÁO: {n_missing_audio} sample bị bỏ qua vì không tìm thấy file audio gốc.")
