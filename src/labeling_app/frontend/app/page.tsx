@@ -80,7 +80,7 @@ export default function Page() {
     try {
       const updated = await resetSample(currentId);
       setDetail(updated);
-      setDraft(updated.asr_internal ?? updated.asr_google ?? updated.asr_phowhisper ?? "");
+      setDraft(updated.asr_rover ?? updated.asr_internal ?? updated.asr_google ?? updated.asr_phowhisper ?? "");
       await refreshList();
     } catch (e) {
       setError(String(e));
@@ -91,6 +91,7 @@ export default function Page() {
 
   const candidates: { label: string; text: string | null }[] = detail
     ? [
+        { label: "ROVER (đã hợp nhất 3 nguồn)", text: detail.asr_rover },
         { label: "ASR nội bộ (Viettel)", text: detail.asr_internal },
         { label: "Google Cloud STT", text: detail.asr_google },
         { label: "PhoWhisper", text: detail.asr_phowhisper },
