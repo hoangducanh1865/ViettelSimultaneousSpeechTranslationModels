@@ -19,6 +19,7 @@ export default function Page() {
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [jumpValue, setJumpValue] = useState("");
 
   const refreshList = useCallback(async () => {
     const list = await listSamples();
@@ -54,6 +55,13 @@ export default function Page() {
   const goTo = (index: number) => {
     if (index < 0 || index >= items.length) return;
     setCurrentId(items[index].id);
+  };
+
+  const handleJump = () => {
+    const n = parseInt(jumpValue, 10);
+    if (!Number.isFinite(n)) return;
+    goTo(n - 1); // người dùng nhập số thứ tự 1-based, mảng items 0-based
+    setJumpValue("");
   };
 
   const handleSubmit = async () => {
@@ -136,6 +144,18 @@ export default function Page() {
             >
               Next →
             </button>
+          </div>
+          <div className="jump-form">
+            <input
+              type="number"
+              min={1}
+              max={items.length}
+              placeholder="Số thứ tự..."
+              value={jumpValue}
+              onChange={(e) => setJumpValue(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleJump()}
+            />
+            <button onClick={handleJump}>Đi tới</button>
           </div>
           <div className="progress">
             Sample {currentIndex + 1} / {items.length}
