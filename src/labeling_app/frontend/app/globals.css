@@ -12,13 +12,19 @@ body {
 .layout {
   display: grid;
   grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .sidebar {
   border-right: 1px solid #e0dfd8;
   background: #fff;
   padding: 16px;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.main {
+  height: 100vh;
   overflow-y: auto;
 }
 
