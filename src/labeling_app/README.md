@@ -13,8 +13,9 @@ Drive cho GATE 1 của notebook đọc tiếp.
   nhỏ -- VieSpeaker/VietnamCeleb/VoxVietnam là dataset nghiên cứu có điều khoản sử dụng
   hạn chế, đưa audio lên nơi công khai có thể vi phạm điều khoản đó. Giữ repo/deploy ở
   chế độ private + gate bằng key là đủ cho nhu cầu 1-2 người review nội bộ.
-- **Label (final_asr_text)**: lưu trong Postgres (add-on của Railway), không dùng
-  SQLite -- ổ đĩa container của Railway là ephemeral, redeploy sẽ mất dữ liệu SQLite.
+- **Label (final_asr_text)**: lưu trong Postgres (managed database của Render), không
+  dùng SQLite -- ổ đĩa container web service của Render là ephemeral, redeploy/restart
+  sẽ mất dữ liệu SQLite.
 - **Đồng bộ lại Drive**: endpoint `/api/export/asr-check.csv` xuất đúng schema
   `asr_manual_check.csv` -- tải về, kéo thả đè vào thư mục `test_set_construction/` trên
   Drive, chạy lại GATE 1 trong notebook như bình thường, không cần convert gì thêm.
@@ -28,7 +29,7 @@ Colab (manifest.jsonl + audio trên Drive)
 backend/audio_data/*.wav + backend/seed_samples.json   (commit vào git)
     │  git push
     ▼
-Railway (backend) ── seed.py nạp vào Postgres
+Render (backend) ── seed.py nạp vào Postgres
     │  REST API
     ▼
 Vercel (frontend) ── người review nghe + nhập final_asr_text
@@ -53,29 +54,57 @@ Zip `audio_data/` + `seed_samples.json`, tải về máy, giải nén đè vào:
 rồi `git add`/`commit`/`push` như bình thường (audio nhỏ nên push git bình thường, không
 cần Git LFS ở quy mô vài chục-vài trăm file ngắn).
 
-## 2. Deploy backend lên Railway
+## 2. Deploy backend lên Render
 
-1. Tạo project mới trên Railway, connect vào repo GitHub này, set **root directory** =
-   `src/labeling_app/backend`.
-2. Add **Postgres** add-on trong cùng project -- Railway tự inject biến `DATABASE_URL`.
-3. Set thêm biến môi trường (xem `.env.example`):
+### Cách A -- Blueprint (khuyên dùng, ít bước tay nhất)
+
+`src/labeling_app/render.yaml` đã khai báo sẵn cả web service lẫn Postgres database:
+
+1. Trên Render dashboard: **New +** → **Blueprint** → connect vào repo GitHub này.
+2. Khi Render hỏi đường dẫn file blueprint, điền `src/labeling_app/render.yaml` (không
+   phải đường dẫn mặc định ở root repo, vì đây là monorepo).
+3. Render tự tạo cả web service (`asr-labeling-backend`) và Postgres
+   (`asr-labeling-db`), tự nối `DATABASE_URL` giữa 2 service với nhau.
+4. Điền 2 biến còn lại (Render để trống vì đánh dấu `sync: false` trong blueprint,
+   cần bạn tự nhập trong tab Environment của service):
    - `AUDIO_ACCESS_KEY` -- chuỗi bí mật tự chọn.
-   - `ALLOWED_ORIGINS` -- domain Vercel của bạn (thêm sau khi deploy frontend xong).
-4. Railway tự nhận `Procfile` (`web: uvicorn main:app --host 0.0.0.0 --port $PORT`).
-5. Sau khi deploy xong, chạy 1 lần để nạp dữ liệu vào Postgres:
+   - `ALLOWED_ORIGINS` -- domain Vercel của bạn (điền tạm `*` nếu chưa deploy frontend,
+     quay lại sửa sau).
+5. Sau khi service deploy xong (trạng thái "Live"), mở tab **Shell** của service trên
+   Render dashboard, chạy:
    ```
-   railway run python seed.py
+   python seed.py
    ```
    (chạy lại lệnh này bất cứ khi nào bạn thêm sample mới vào `seed_samples.json` --
    idempotent, không đè `final_asr_text` của sample đã submit).
 
+### Cách B -- Tạo tay từng service (nếu không muốn dùng Blueprint)
+
+1. **New +** → **PostgreSQL**, đặt tên bất kỳ, plan Free -- Render tạo xong sẽ cho 1
+   "Internal Database URL", copy lại.
+2. **New +** → **Web Service**, connect repo, set:
+   - **Root Directory**: `src/labeling_app/backend`
+   - **Runtime**: Python 3
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+     (`Procfile` có sẵn trong thư mục nhưng Render không tự đọc Procfile cho Python
+     service như Railway/Heroku -- phải điền Start Command thủ công như trên).
+3. Tab Environment của web service, thêm:
+   - `DATABASE_URL` = Internal Database URL vừa copy ở bước 1.
+   - `AUDIO_ACCESS_KEY`, `ALLOWED_ORIGINS` -- như Cách A.
+4. Deploy xong, vào tab **Shell**, chạy `python seed.py` như Cách A.
+
+**Lưu ý free tier**: web service Free của Render tự ngủ sau ~15 phút không có request,
+lần gọi đầu tiên sau khi ngủ sẽ mất 30-60s để tỉnh dậy (cold start) -- không phải lỗi,
+người review chỉ cần đợi lần đầu load trang.
+
 ## 3. Deploy frontend lên Vercel
 
 1. Import repo, set **root directory** = `src/labeling_app/frontend`.
-2. Set biến môi trường `NEXT_PUBLIC_API_URL` = URL backend Railway (vd
-   `https://xxx.up.railway.app`).
-3. Deploy. Quay lại Railway, cập nhật `ALLOWED_ORIGINS` thành domain Vercel vừa có,
-   redeploy backend.
+2. Set biến môi trường `NEXT_PUBLIC_API_URL` = URL backend Render (vd
+   `https://asr-labeling-backend.onrender.com`).
+3. Deploy. Quay lại Render, cập nhật `ALLOWED_ORIGINS` thành domain Vercel vừa có,
+   service sẽ tự redeploy khi lưu biến môi trường mới.
 
 ## 4. Chạy local để test trước khi deploy
 
