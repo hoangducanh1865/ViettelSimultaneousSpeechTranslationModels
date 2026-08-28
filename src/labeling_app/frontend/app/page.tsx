@@ -178,20 +178,6 @@ export default function Page() {
             </div>
 
             <div className="card">
-              <h3>3 bản ASR ứng viên (bấm để copy vào ô sửa bên dưới)</h3>
-              {candidates.map((c) => (
-                <div
-                  key={c.label}
-                  className="asr-candidate"
-                  onClick={() => c.text && setDraft(c.text)}
-                >
-                  <div className="label">{c.label}</div>
-                  {c.text ? c.text : <span className="empty">(không có / lỗi)</span>}
-                </div>
-              ))}
-            </div>
-
-            <div className="card">
               <h3>Bản ASR final (sửa tay tại đây)</h3>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
               <div className="action-buttons">
@@ -202,6 +188,20 @@ export default function Page() {
                   Submit
                 </button>
               </div>
+            </div>
+
+            <div className="card">
+              <h3>3 bản ASR ứng viên (bấm để copy vào ô sửa bên trên)</h3>
+              {candidates.map((c) => (
+                <div
+                  key={c.label}
+                  className="asr-candidate"
+                  onClick={() => c.text && setDraft(c.text)}
+                >
+                  <div className="label">{c.label}</div>
+                  {c.text ? c.text : <span className="empty">(không có / lỗi)</span>}
+                </div>
+              ))}
             </div>
           </>
         )}
