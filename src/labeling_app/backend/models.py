@@ -20,6 +20,10 @@ class Sample(Base):
     asr_rover = Column(Text, nullable=True)
 
     final_asr_text = Column(Text, nullable=True)
+
+    mt_en = Column(Text, nullable=True)
+    final_mt_text = Column(Text, nullable=True)
+
     status = Column(String, nullable=False, default="pending")  # "pending" | "done"
 
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

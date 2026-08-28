@@ -68,6 +68,7 @@ def main():
                 "asr_internal": (row.get("asr_internal") or {}).get("text"),
                 "asr_phowhisper": (row.get("asr_phowhisper") or {}).get("text"),
                 "asr_rover": row.get("asr_rover"),
+                "mt_en": row.get("mt_en"),
             })
 
     with open(seed_out_path, "w", encoding="utf-8") as f:

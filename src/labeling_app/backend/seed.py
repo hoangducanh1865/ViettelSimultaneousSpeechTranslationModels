@@ -45,6 +45,7 @@ def run(seed_path: Path):
                     asr_internal=row.get("asr_internal"),
                     asr_phowhisper=row.get("asr_phowhisper"),
                     asr_rover=row.get("asr_rover"),
+                    mt_en=row.get("mt_en"),
                 ))
                 n_new += 1
             else:
@@ -58,6 +59,7 @@ def run(seed_path: Path):
                 existing.asr_internal = row.get("asr_internal")
                 existing.asr_phowhisper = row.get("asr_phowhisper")
                 existing.asr_rover = row.get("asr_rover")
+                existing.mt_en = row.get("mt_en")
                 n_updated += 1
 
         db.commit()

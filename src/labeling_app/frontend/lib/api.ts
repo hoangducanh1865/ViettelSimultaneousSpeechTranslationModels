@@ -16,6 +16,8 @@ export type SampleDetail = SampleListItem & {
   asr_phowhisper: string | null;
   asr_rover: string | null;
   final_asr_text: string | null;
+  mt_en: string | null;
+  final_mt_text: string | null;
   updated_at: string | null;
 };
 
@@ -39,10 +41,10 @@ export function getSample(id: string): Promise<SampleDetail> {
   return request<SampleDetail>(`/api/samples/${encodeURIComponent(id)}`);
 }
 
-export function submitSample(id: string, finalAsrText: string): Promise<SampleDetail> {
+export function submitSample(id: string, finalAsrText: string, finalMtText: string): Promise<SampleDetail> {
   return request<SampleDetail>(`/api/samples/${encodeURIComponent(id)}/submit`, {
     method: "POST",
-    body: JSON.stringify({ final_asr_text: finalAsrText }),
+    body: JSON.stringify({ final_asr_text: finalAsrText, final_mt_text: finalMtText }),
   });
 }
 
@@ -57,5 +59,5 @@ export function audioSrc(audioUrl: string): string {
 }
 
 export function exportCsvUrl(): string {
-  return `${API_URL}/api/export/asr-check.csv`;
+  return `${API_URL}/api/export/mt-check.csv`;
 }

@@ -27,6 +27,8 @@ class SampleDetail(BaseModel):
     asr_phowhisper: str | None
     asr_rover: str | None
     final_asr_text: str | None
+    mt_en: str | None
+    final_mt_text: str | None
     status: str
     updated_at: datetime | None
 
@@ -36,3 +38,4 @@ class SampleDetail(BaseModel):
 
 class SubmitPayload(BaseModel):
     final_asr_text: str
+    final_mt_text: str

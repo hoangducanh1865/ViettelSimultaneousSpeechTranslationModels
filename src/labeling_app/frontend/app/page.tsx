@@ -17,6 +17,7 @@ export default function Page() {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SampleDetail | null>(null);
   const [draft, setDraft] = useState("");
+  const [mtDraft, setMtDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jumpValue, setJumpValue] = useState("");
@@ -41,6 +42,7 @@ export default function Page() {
       .then((d) => {
         setDetail(d);
         setDraft(d.final_asr_text ?? d.asr_rover ?? d.asr_internal ?? d.asr_google ?? d.asr_phowhisper ?? "");
+        setMtDraft(d.final_mt_text ?? d.mt_en ?? "");
       })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
@@ -65,10 +67,10 @@ export default function Page() {
   };
 
   const handleSubmit = async () => {
-    if (!currentId || !draft.trim()) return;
+    if (!currentId || !draft.trim() || !mtDraft.trim()) return;
     setLoading(true);
     try {
-      const updated = await submitSample(currentId, draft.trim());
+      const updated = await submitSample(currentId, draft.trim(), mtDraft.trim());
       setDetail(updated);
       const list = await refreshList();
       const idx = list.findIndex((it) => it.id === currentId);
@@ -89,6 +91,7 @@ export default function Page() {
       const updated = await resetSample(currentId);
       setDetail(updated);
       setDraft(updated.asr_rover ?? updated.asr_internal ?? updated.asr_google ?? updated.asr_phowhisper ?? "");
+      setMtDraft(updated.mt_en ?? "");
       await refreshList();
     } catch (e) {
       setError(String(e));
@@ -178,20 +181,29 @@ export default function Page() {
             </div>
 
             <div className="card">
-              <h3>Bản ASR final (sửa tay tại đây)</h3>
+              <h3>Bản ASR final (tiếng Việt, sửa tay tại đây)</h3>
               <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
+            </div>
+
+            <div className="card">
+              <h3>Bản dịch final (tiếng Anh, sửa tay tại đây)</h3>
+              <textarea value={mtDraft} onChange={(e) => setMtDraft(e.target.value)} />
               <div className="action-buttons">
                 <button onClick={handleReset} className="danger" disabled={loading}>
                   Làm lại
                 </button>
-                <button onClick={handleSubmit} className="primary" disabled={loading || !draft.trim()}>
+                <button
+                  onClick={handleSubmit}
+                  className="primary"
+                  disabled={loading || !draft.trim() || !mtDraft.trim()}
+                >
                   Submit
                 </button>
               </div>
             </div>
 
             <div className="card">
-              <h3>3 bản ASR ứng viên (bấm để copy vào ô sửa bên trên)</h3>
+              <h3>3 bản ASR ứng viên (bấm để copy vào ô transcript bên trên)</h3>
               {candidates.map((c) => (
                 <div
                   key={c.label}
@@ -202,6 +214,17 @@ export default function Page() {
                   {c.text ? c.text : <span className="empty">(không có / lỗi)</span>}
                 </div>
               ))}
+            </div>
+
+            <div className="card">
+              <h3>Bản dịch nháp (Gemini, bấm để copy vào ô dịch bên trên)</h3>
+              <div
+                className="asr-candidate"
+                onClick={() => detail.mt_en && setMtDraft(detail.mt_en)}
+              >
+                <div className="label">Gemini (dịch từ ROVER)</div>
+                {detail.mt_en ? detail.mt_en : <span className="empty">(chưa dịch / lỗi)</span>}
+              </div>
             </div>
           </>
         )}

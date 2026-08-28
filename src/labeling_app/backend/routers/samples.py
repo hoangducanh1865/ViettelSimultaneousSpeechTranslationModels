@@ -31,6 +31,8 @@ def _to_detail(sample: Sample) -> SampleDetail:
         asr_phowhisper=sample.asr_phowhisper,
         asr_rover=sample.asr_rover,
         final_asr_text=sample.final_asr_text,
+        mt_en=sample.mt_en,
+        final_mt_text=sample.final_mt_text,
         status=sample.status,
         updated_at=sample.updated_at,
     )
@@ -55,11 +57,15 @@ def submit_sample(sample_id: str, payload: SubmitPayload, db: Session = Depends(
     if sample is None:
         raise HTTPException(status_code=404, detail="Không tìm thấy sample")
 
-    text = payload.final_asr_text.strip()
-    if not text:
+    asr_text = payload.final_asr_text.strip()
+    mt_text = payload.final_mt_text.strip()
+    if not asr_text:
         raise HTTPException(status_code=400, detail="final_asr_text không được để trống")
+    if not mt_text:
+        raise HTTPException(status_code=400, detail="final_mt_text không được để trống")
 
-    sample.final_asr_text = text
+    sample.final_asr_text = asr_text
+    sample.final_mt_text = mt_text
     sample.status = "done"
     db.commit()
     db.refresh(sample)
@@ -74,6 +80,7 @@ def reset_sample(sample_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy sample")
 
     sample.final_asr_text = None
+    sample.final_mt_text = None
     sample.status = "pending"
     db.commit()
     db.refresh(sample)
