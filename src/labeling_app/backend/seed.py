@@ -9,6 +9,12 @@ final_mt_text/status are NEVER included in the update set, so work already
 done by reviewers through the web app is preserved no matter how many times
 this is re-run.
 
+Sau khi upsert, XOÁ khỏi DB mọi sample không còn xuất hiện trong seed_samples.json
+(vd bị loại bởi bộ lọc tiếng Anh/hallucination mục 2.5, hoặc audio gốc không tìm
+thấy) -- nếu không, những sample rác đã seed từ 1 lần chạy trước sẽ tồn tại vĩnh
+viễn trong DB dù bạn lọc lại manifest.jsonl sạch đến đâu và seed lại bao nhiêu lần,
+vì upsert chỉ update/insert, không bao giờ tự xoá row thừa.
+
 Usage: python seed.py [path/to/seed_samples.json]
 """
 import json
@@ -16,6 +22,7 @@ import sys
 from pathlib import Path
 
 from tqdm import tqdm
+from sqlalchemy import delete, select
 
 from database import Base, SessionLocal, engine
 from models import Sample
@@ -56,6 +63,7 @@ def run(seed_path: Path):
 
     insert = _insert_builder()
     n_total = len(rows)
+    seed_ids = {row["id"] for row in rows}
 
     db = SessionLocal()
     try:
@@ -90,6 +98,30 @@ def run(seed_path: Path):
 
         print(f"Seed xong: {n_total} sample (upsert theo batch {BATCH_SIZE}). "
               "final_asr_text/final_mt_text/status của sample cũ được giữ nguyên.")
+
+        # Xoá sample thừa (không còn trong seed_samples.json) -- vd bị lọc nhiễu ở
+        # mục 2.5 sau lần seed trước, hoặc audio gốc không tìm thấy khi chạy
+        # prepare_data.py. Không xoá được bằng upsert, phải làm riêng.
+        existing_ids = set(db.execute(select(Sample.id)).scalars().all())
+        orphan_ids = sorted(existing_ids - seed_ids)
+        if orphan_ids:
+            n_reviewed = db.execute(
+                select(Sample.id).where(
+                    Sample.id.in_(orphan_ids), Sample.final_asr_text.is_not(None)
+                )
+            ).scalars().all()
+            if n_reviewed:
+                print(f"CẢNH BÁO: {len(n_reviewed)}/{len(orphan_ids)} sample bị xoá ĐÃ ĐƯỢC REVIEW "
+                      f"tay trước đó (final_asr_text có giá trị) -- công review đó sẽ mất theo: "
+                      f"{n_reviewed[:10]}{'...' if len(n_reviewed) > 10 else ''}")
+
+            for i in range(0, len(orphan_ids), BATCH_SIZE):
+                batch_ids = orphan_ids[i : i + BATCH_SIZE]
+                db.execute(delete(Sample).where(Sample.id.in_(batch_ids)))
+                db.commit()
+            print(f"Đã xoá {len(orphan_ids)} sample thừa (không còn trong seed_samples.json).")
+        else:
+            print("Không có sample thừa cần xoá.")
     finally:
         db.close()
 
