@@ -1,18 +1,5 @@
 [
   {
-    "id": "VieSpeaker::id00002/0038.wav",
-    "source_dataset": "VieSpeaker",
-    "speaker_id": "id00002",
-    "duration_sec": 25.853,
-    "audio_filename": "VieSpeaker__id00002_0038.wav",
-    "original_audio_path": "/content/drive/MyDrive/it/vdt/voice_agent_for_edge_device/datasets/public/datasets_ast/VieSpeaker/audio_for_ast_test/id00002/0038.wav",
-    "asr_google": "Coi mờ. Open up. What do you say? Coi mờ. Coi mờ. He really don't talk to girls, that's why he don't understand it. But I also feel like, you know, so Oh, you do talk to girls? I I used to talk to girls. Who? Say it. I don't know who. Send me them Instagram. No. Mm, that's what I thought. It's the girls that I used to talk to. Mm. I check your phone later. Oh, shit. So, what is your old relationship be like that makes you think like that?",
-    "asr_internal": "he really don't talk to girls he don't understand it but i also feel like you know i used to talk to girls who say it i don't know who xem you đem in sài gòn đó đó là i thought it's the girl that i used to talk to",
-    "asr_phowhisper": "cởi mở ốp ưn ớp goai dì sây cơ môi cơ môi hư hứt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt",
-    "asr_rover": "hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt hớt he really don t talk to girls that s why he don t understand it but i also feel like you know so oh you do talk to girls i i used to talk to girls who say it i don t know who hớt hớt hớt hớt hớt hớt hớt hớt hớt i thought it s the hớt that i used to talk to mm i check your phone later oh shit so what is your old relationship be like that makes you think like that",
-    "mt_en": "open, open, open... he really doesn't talk to girls, that's why he doesn't understand it, but I also feel like, you know, so oh you do talk to girls? I used to talk to girls who... I don't know who... in Saigon, that's it, I thought it was the girl that I used to talk to. I'll check your phone later. Oh shit, so what was your old relationship like that makes you think like that?"
-  },
-  {
     "id": "VietnamCeleb::id00880/00000.wav",
     "source_dataset": "VietnamCeleb",
     "speaker_id": "id00880",
