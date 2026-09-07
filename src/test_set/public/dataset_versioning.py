@@ -21,10 +21,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from text_normalize import normalize_text, repetition_ratio
+from text_normalize import contains_vietnamese_diacritics, normalize_text, repetition_ratio
 
 REQUIRED_FIELDS = ("id", "source_dataset", "audio_path", "duration_sec", "text_vi", "text_en")
 REPETITION_THRESHOLD = 0.3
+MIN_WORDS_FOR_LANGUAGE_TEXT_CHECK = 5  # câu quá ngắn (vd "Vâng.", "Ok") không đủ tin cậy để kỳ vọng có dấu
 # `repetition_ratio(text, n=2)`'s theoretical FLOOR (when every bigram is distinct,
 # i.e. zero real repetition) is `2/len(words)` -- for any sentence of <=6 words that
 # floor already exceeds REPETITION_THRESHOLD (2/6=0.333), so short-but-perfectly-
@@ -159,6 +160,17 @@ def validate_samples(
 
         if not str(sample["text_vi"]).strip() or not str(sample["text_en"]).strip():
             add(sample_id, "empty_text", "text_vi/text_en rỗng sau khi strip()")
+
+        # text_vi/text_en PHẢI đúng ngôn ngữ tên field ghi -- bất kể TEST_DIRECTION
+        # nào (đây là quy ước cố định của schema, không đảo theo chiều dịch). Bắt
+        # được đúng loại lỗi từng gặp với model nội bộ (trả nguyên văn tiếng nguồn
+        # thay vì dịch) nếu nó lỡ xảy ra ở khâu build ground truth -- vd người review
+        # tay dán nhầm cột, hoặc bước dịch thất bại mà không có gì bắt lại.
+        if contains_vietnamese_diacritics(sample["text_en"]):
+            add(sample_id, "text_en_contains_vietnamese", "text_en chứa ký tự có dấu tiếng Việt")
+        if (len(sample["text_vi"].split()) >= MIN_WORDS_FOR_LANGUAGE_TEXT_CHECK
+                and not contains_vietnamese_diacritics(sample["text_vi"])):
+            add(sample_id, "text_vi_missing_diacritics", "text_vi đủ dài nhưng không có dấu tiếng Việt nào")
 
         audio_path = Path(sample["audio_path"])
         if not audio_path.exists():

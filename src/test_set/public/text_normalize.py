@@ -9,6 +9,13 @@ from collections import Counter
 _KEEP_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WS_RE = re.compile(r"\s+")
 
+_VN_DIACRITIC_RE = re.compile(
+    "[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợ"
+    "ùúủũụưừứửữựỳýỷỹỵđ"
+    "ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢ"
+    "ÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]"
+)
+
 
 def normalize_text(text: str) -> str:
     """Normalize text so outputs from different ASR backends become
@@ -33,6 +40,16 @@ def tokenize(text: str) -> list[str]:
     """normalize_text(text) split into words."""
     normalized = normalize_text(text)
     return normalized.split() if normalized else []
+
+
+def contains_vietnamese_diacritics(text: str) -> bool:
+    """True if `text` contains at least one Vietnamese diacritic character.
+    English essentially never contains these -- a cheap, low-false-positive
+    signal for "this text_en accidentally contains Vietnamese" (vs. trying
+    to positively classify "is this really English", which is unreliable).
+    Also used the other way: a sufficiently long text_vi with ZERO
+    diacritics is suspicious (Vietnamese relies heavily on tone marks)."""
+    return bool(_VN_DIACRITIC_RE.search(text))
 
 
 def repetition_ratio(text: str, n: int = 2) -> float:
