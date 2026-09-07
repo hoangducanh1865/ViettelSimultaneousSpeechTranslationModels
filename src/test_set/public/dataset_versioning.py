@@ -43,7 +43,17 @@ MIN_WORDS_FOR_DEGENERATE_CHECK = 8
 DURATION_TOLERANCE_SEC = 0.5
 
 
-def _atomic_write_json(path: Path, payload: dict) -> None:
+def atomic_write_json(path: Path, payload: dict) -> None:
+    """Write `payload` to `path` via a `.tmp` file + `os.replace()` -- never
+    leaves `path` truncated/corrupt if interrupted mid-write (a plain
+    `open(path, "w")` does: a crash/KeyboardInterrupt during `json.dump()`
+    can leave a 0-byte or partial file, which then fails to `json.load()`
+    on the next run with no way to recover the previous good content).
+    Public (not `_`-prefixed): also reused directly by notebook cells that
+    maintain their own small JSON caches (e.g. the internal-model eval
+    result caches in `TestSet_construction`'s mục 9.5) instead of each
+    re-implementing this.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -248,7 +258,7 @@ def save_version(versions_dir: Path, tmp_envelope: dict, *, validation_passed: b
     a later fix goes into `ver_(N+1).json`). Also updates `index.json`."""
     version = next_version_number(versions_dir)
     version_path = versions_dir / f"ver_{version}.json"
-    _atomic_write_json(version_path, tmp_envelope)
+    atomic_write_json(version_path, tmp_envelope)
 
     index_path = versions_dir / "index.json"
     index = []
@@ -264,7 +274,7 @@ def save_version(versions_dir: Path, tmp_envelope: dict, *, validation_passed: b
         "n_samples": len(tmp_envelope.get("samples", {})),
         "validation_passed": validation_passed,
     })
-    _atomic_write_json(index_path, index)
+    atomic_write_json(index_path, index)
     return version_path
 
 
