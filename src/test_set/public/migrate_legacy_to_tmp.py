@@ -54,6 +54,32 @@ def _load_jsonl(path: Path) -> list[dict]:
     return rows
 
 
+def _resolve_audio_path(direction: str, testset_dir: Path, sample_id: str, source_dataset: str, stored_path: str) -> str:
+    """`audio_path` in the legacy files is an ABSOLUTE path written at the
+    time each pipeline ran -- if the dataset folder was later moved (e.g.
+    dồn vào `datasets_ast/`, the exact drift this project already hit once
+    in `Internal_AST_Evaluation_Colab.ipynb`), that path no longer exists
+    even though the file itself is fine. Try the known-good convention for
+    each direction before giving up and keeping the stored (possibly
+    stale) path as-is.
+    """
+    if Path(stored_path).exists():
+        return stored_path
+
+    if direction == "en_vi":
+        # PhoST.ipynb's convention: {PHOST_DIR}/audio/{talk_id}_{seg:04d}.wav
+        fallback = testset_dir / "audio" / Path(stored_path).name
+    else:
+        # TestSet_construction's convention: raw audio lives under each
+        # source dataset's OWN folder, not under test_set_construction/ --
+        # id format is "{source_dataset}::{relpath}", relpath reconstructs
+        # the original location under DATASETS_AST_DIR/{source_dataset}/audio_for_ast_test/.
+        relpath = sample_id.split("::", 1)[1] if "::" in sample_id else Path(stored_path).name
+        fallback = testset_dir.parent / source_dataset / "audio_for_ast_test" / relpath
+
+    return str(fallback) if fallback.exists() else stored_path
+
+
 def migrate_vi_en(testset_dir: Path) -> dict:
     manifest_path = testset_dir / "manifest.jsonl"
     if not manifest_path.exists():
@@ -61,14 +87,21 @@ def migrate_vi_en(testset_dir: Path) -> dict:
 
     envelope = new_envelope(direction="vi_en", generation_mode="heavy_pipeline")
     n_final = 0
+    n_path_fixed = 0
     for row in _load_jsonl(manifest_path):
         sample = dict(row)  # copy toàn bộ field gốc (asr_google/.../final_mt_text) nguyên vẹn
+        resolved = _resolve_audio_path("vi_en", testset_dir, sample["id"], sample["source_dataset"], sample["audio_path"])
+        if resolved != sample["audio_path"]:
+            n_path_fixed += 1
+        sample["audio_path"] = resolved
         derive_final_fields(sample, direction="vi_en", generation_mode="heavy_pipeline")
         if sample.get("text_vi") and sample.get("text_en"):
             n_final += 1
         envelope["samples"][sample["id"]] = sample
 
     normalize_samples(envelope["samples"])
+    if n_path_fixed:
+        print(f"Đã tự sửa lại audio_path (thư mục dataset đã bị di chuyển) cho {n_path_fixed} sample.")
     print(f"vi_en: {len(envelope['samples'])} sample, {n_final} đã có đủ text_vi/text_en (đã review xong).")
     return envelope
 
@@ -87,6 +120,7 @@ def migrate_en_vi(testset_dir: Path) -> dict:
 
     envelope = new_envelope(direction="en_vi", generation_mode="phost")
     n_missing_cased = 0
+    n_path_fixed = 0
     for row in _load_jsonl(final_path):
         sample_id = row["id"]
         cased_row = cased_by_id.get(sample_id)
@@ -96,11 +130,15 @@ def migrate_en_vi(testset_dir: Path) -> dict:
             n_missing_cased += 1
             text_vi_cased = row["text_vi"]  # đã lowercase/mất dấu câu -- chấp nhận tạm, không có bản gốc
 
+        resolved_audio_path = _resolve_audio_path("en_vi", testset_dir, sample_id, row["source_dataset"], row["audio_path"])
+        if resolved_audio_path != row["audio_path"]:
+            n_path_fixed += 1
+
         sample = {
             "id": sample_id,
             "source_dataset": row["source_dataset"],
             "speaker_id": row.get("speaker_id"),
-            "audio_path": row["audio_path"],
+            "audio_path": resolved_audio_path,
             "duration_sec": row.get("duration_sec"),
             "text_vi_cased": text_vi_cased,
             "text_en_cased": row["text_en"],  # text_en chưa từng bị chuẩn hoá, giữ nguyên là bản gốc
@@ -108,6 +146,8 @@ def migrate_en_vi(testset_dir: Path) -> dict:
         envelope["samples"][sample_id] = sample
 
     normalize_samples(envelope["samples"])
+    if n_path_fixed:
+        print(f"Đã tự sửa lại audio_path (thư mục dataset đã bị di chuyển) cho {n_path_fixed} sample.")
     if n_missing_cased:
         print(f"CẢNH BÁO: {n_missing_cased}/{len(envelope['samples'])} sample thiếu bản text_vi có dấu câu gốc "
               f"trong {cased_path.name} -- dùng tạm bản đã chuẩn hoá sẵn làm text_vi_cased.")
