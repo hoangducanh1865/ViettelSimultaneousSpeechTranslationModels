@@ -21,7 +21,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from text_normalize import contains_vietnamese_diacritics, normalize_text, repetition_ratio
+from text_normalize import (
+    contains_distinctive_vietnamese_diacritics,
+    contains_vietnamese_diacritics,
+    normalize_text,
+    repetition_ratio,
+)
 
 REQUIRED_FIELDS = ("id", "source_dataset", "audio_path", "duration_sec", "text_vi", "text_en")
 REPETITION_THRESHOLD = 0.3
@@ -166,7 +171,12 @@ def validate_samples(
         # được đúng loại lỗi từng gặp với model nội bộ (trả nguyên văn tiếng nguồn
         # thay vì dịch) nếu nó lỡ xảy ra ở khâu build ground truth -- vd người review
         # tay dán nhầm cột, hoặc bước dịch thất bại mà không có gì bắt lại.
-        if contains_vietnamese_diacritics(sample["text_en"]):
+        # Dùng bản STRICT (chỉ ký tự/dấu độc quyền tiếng Việt: ư ơ ă đ, dấu
+        # hỏi/nặng, tổ hợp ^+huyền/sắc/ngã...) chứ không dùng bản rộng --
+        # bản rộng coi cả é/à/ê/ã (dùng chung với Pháp/Bồ Đào Nha/Tây Ban
+        # Nha/Ý) là "tiếng Việt", nên từng báo sai với tên riêng hợp lệ
+        # trong câu tiếng Anh (vd "René Descartes").
+        if contains_distinctive_vietnamese_diacritics(sample["text_en"]):
             add(sample_id, "text_en_contains_vietnamese", "text_en chứa ký tự có dấu tiếng Việt")
         if (len(sample["text_vi"].split()) >= MIN_WORDS_FOR_LANGUAGE_TEXT_CHECK
                 and not contains_vietnamese_diacritics(sample["text_vi"])):

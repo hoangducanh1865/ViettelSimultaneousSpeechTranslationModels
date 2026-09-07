@@ -16,6 +16,19 @@ _VN_DIACRITIC_RE = re.compile(
     "ÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]"
 )
 
+# Subset of the above that EXCLUDES the plain single-accent letters
+# (à á â ã è é ê ì í ò ó ô õ ù ú ý) shared with French/Portuguese/Spanish/
+# Italian -- those alone are common in real English text via loaned proper
+# nouns (e.g. "René Descartes") and are NOT a reliable Vietnamese signal.
+# Only Vietnamese-exclusive letters (ư ơ ă đ) and Vietnamese-exclusive tone
+# marks (hook-above / dot-below / stacked circumflex+grave etc., e.g.
+# ả ẹ ỉ ị ầ ấ ẫ ằ ắ ẵ ...) remain -- these genuinely never occur in those
+# other languages, so this is a high-precision "this is Vietnamese" check.
+_VN_DISTINCTIVE_DIACRITIC_RE = re.compile(
+    "[ảạăằắẳẵặầấẩẫậẻẽẹềếểễệỉịỏọồốổỗộơờớởỡợủụưừứửữựỳỷỹỵđ"
+    "ẢẠĂẰẮẲẴẶẦẤẨẪẬẺẼẸỀẾỂỄỆỈỊỎỌỒỐỔỖỘƠỜỚỞỠỢỦỤƯỪỨỬỮỰỲỶỸỴĐ]"
+)
+
 
 def normalize_text(text: str) -> str:
     """Normalize text so outputs from different ASR backends become
@@ -50,6 +63,17 @@ def contains_vietnamese_diacritics(text: str) -> bool:
     Also used the other way: a sufficiently long text_vi with ZERO
     diacritics is suspicious (Vietnamese relies heavily on tone marks)."""
     return bool(_VN_DIACRITIC_RE.search(text))
+
+
+def contains_distinctive_vietnamese_diacritics(text: str) -> bool:
+    """Stricter than `contains_vietnamese_diacritics`: True only for
+    Vietnamese-EXCLUSIVE letters/tone marks (ư ơ ă đ, hook-above, dot-below,
+    stacked circumflex+grave/acute/tilde combos). Excludes the plain single
+    accents (é, à, ê, ã, ...) that French/Portuguese/Spanish/Italian proper
+    nouns also use -- catches false positives like "René Descartes"
+    correctly appearing in an English sentence, which the broad check
+    above would (and did) wrongly flag as "text_en contains Vietnamese"."""
+    return bool(_VN_DISTINCTIVE_DIACRITIC_RE.search(text))
 
 
 def repetition_ratio(text: str, n: int = 2) -> float:
