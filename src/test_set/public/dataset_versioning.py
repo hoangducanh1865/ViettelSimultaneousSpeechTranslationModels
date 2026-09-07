@@ -25,6 +25,15 @@ from text_normalize import normalize_text, repetition_ratio
 
 REQUIRED_FIELDS = ("id", "source_dataset", "audio_path", "duration_sec", "text_vi", "text_en")
 REPETITION_THRESHOLD = 0.3
+# `repetition_ratio(text, n=2)`'s theoretical FLOOR (when every bigram is distinct,
+# i.e. zero real repetition) is `2/len(words)` -- for any sentence of <=6 words that
+# floor already exceeds REPETITION_THRESHOLD (2/6=0.333), so short-but-perfectly-
+# normal sentences ("Thank you very much." -> 4 words -> floor 0.5) get flagged as
+# "degenerate" no matter what. Confirmed empirically on real PhoST samples (all
+# flagged text was 4-6 words, zero actual repeated bigrams). Below this many words
+# the metric can't distinguish real repetition from its own mathematical floor, so
+# skip the check entirely rather than have it fire unconditionally.
+MIN_WORDS_FOR_DEGENERATE_CHECK = 8
 DURATION_TOLERANCE_SEC = 0.5
 
 
@@ -165,9 +174,11 @@ def validate_samples(
             except Exception as e:
                 add(sample_id, "language_id_error", repr(e))
 
-        if repetition_ratio(sample["text_vi"]) >= REPETITION_THRESHOLD:
+        if (len(sample["text_vi"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
+                and repetition_ratio(sample["text_vi"]) >= REPETITION_THRESHOLD):
             add(sample_id, "degenerate_text_vi", "lặp từ >= 30% trong text_vi")
-        if repetition_ratio(sample["text_en"]) >= REPETITION_THRESHOLD:
+        if (len(sample["text_en"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
+                and repetition_ratio(sample["text_en"]) >= REPETITION_THRESHOLD):
             add(sample_id, "degenerate_text_en", "lặp từ >= 30% trong text_en")
 
         text_vi_cased = sample.get("text_vi_cased")
