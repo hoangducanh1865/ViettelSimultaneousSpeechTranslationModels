@@ -52,6 +52,34 @@ def publish_test_set(
     return f"https://huggingface.co/datasets/{repo_id}"
 
 
+def publish_annotated_samples(
+    rows: list[dict],
+    repo_id: str,
+    *,
+    token: str,
+    private: bool,
+    split: str,
+) -> str:
+    """Push arbitrary `rows` (each must have an `audio` key -- a real wav
+    path, embedded into Parquet on push) as an HF `Dataset`. Unlike
+    `publish_test_set()`, no fixed column schema -- for auxiliary/debug
+    datasets that carry extra columns (e.g. internal-model ASR transcript +
+    AST translation output) beyond the core ground-truth quad. `split` has
+    no default here (unlike `publish_test_set`'s `"test"`) since these
+    datasets are commonly split by direction and/or success/failure bucket
+    rather than always being a single "test" split.
+    """
+    from datasets import Audio, Dataset
+    from huggingface_hub import login
+
+    login(token=token)
+
+    ds = Dataset.from_list(rows)
+    ds = ds.cast_column("audio", Audio())
+    ds.push_to_hub(repo_id, private=private, split=split)
+    return f"https://huggingface.co/datasets/{repo_id}"
+
+
 def upload_json_artifact(
     local_path: Path,
     repo_id: str,
