@@ -114,6 +114,7 @@ def validate_samples(
     audio_language: str,
     check_audio_language: bool = True,
     check_duration: bool = True,
+    check_degenerate: bool = True,
 ) -> ValidationReport:
     """Run every check below on `samples` (keyed by id, tmp.json's shape)
     and return a `ValidationReport` -- never raises itself, call
@@ -124,6 +125,18 @@ def validate_samples(
     full re-run), language-ID sanity (`lang_id.py`, `check_audio_language=
     False` to skip/soft-skip e.g. for PhoST's already-official ground
     truth), degenerate/repetition, and the normalization invariant.
+
+    `check_degenerate=False` for `generation_mode="phost"`: the repetition
+    check exists to catch ASR-hallucination loops, but PhoST text never
+    went through ASR at all (official human transcripts) -- even after
+    fixing the short-sentence floor bug, real PhoST sentences still trip
+    it on GENUINE, meaningful repetition (anaphora/rhetorical emphasis --
+    "recommendation system after recommendation system", "a lot of X, a
+    lot of Y, and a lot of Z" -- or a speaker's real self-correction
+    captured verbatim in the transcript). Checking for "did ASR
+    hallucinate" on text that was never ASR'd is checking for a failure
+    mode that cannot occur; keep this on for `heavy_pipeline` (vi_en, and
+    future en_vi), where ASR genuinely runs and can loop.
     """
     issues: list[ValidationIssue] = []
 
@@ -174,12 +187,13 @@ def validate_samples(
             except Exception as e:
                 add(sample_id, "language_id_error", repr(e))
 
-        if (len(sample["text_vi"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
-                and repetition_ratio(sample["text_vi"]) >= REPETITION_THRESHOLD):
-            add(sample_id, "degenerate_text_vi", "lặp từ >= 30% trong text_vi")
-        if (len(sample["text_en"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
-                and repetition_ratio(sample["text_en"]) >= REPETITION_THRESHOLD):
-            add(sample_id, "degenerate_text_en", "lặp từ >= 30% trong text_en")
+        if check_degenerate:
+            if (len(sample["text_vi"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
+                    and repetition_ratio(sample["text_vi"]) >= REPETITION_THRESHOLD):
+                add(sample_id, "degenerate_text_vi", "lặp từ >= 30% trong text_vi")
+            if (len(sample["text_en"].split()) >= MIN_WORDS_FOR_DEGENERATE_CHECK
+                    and repetition_ratio(sample["text_en"]) >= REPETITION_THRESHOLD):
+                add(sample_id, "degenerate_text_en", "lặp từ >= 30% trong text_en")
 
         text_vi_cased = sample.get("text_vi_cased")
         if text_vi_cased and normalize_text(text_vi_cased) != sample["text_vi"]:
