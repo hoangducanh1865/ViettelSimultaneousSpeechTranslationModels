@@ -1,0 +1,9 @@
+openai>=1.0.0
+pandas
+termcolor
+pexpect
+scipy
+ipdb
+absl-py
+diskcache
+tqdm
