@@ -134,7 +134,6 @@ class GptApi:
 
     def call_api(self, prompt, model, temperature, max_tokens):
         parameters = {
-            "temperature": temperature/10,
             "top_p": 1,
             "n": 1,
             "frequency_penalty": 0,
@@ -142,6 +141,16 @@ class GptApi:
             "stop": None,
             "model": model
         }
+
+        # Patched (not upstream): newer OpenAI models (gpt-5.x family, reasoning-style)
+        # reject any custom `temperature` with "Unsupported value: 'temperature' does
+        # not support 0.0 with this model. Only the default (1) value is supported."
+        # GEMBA always starts at temperature=0 (this method's `temperature/10 == 0`) --
+        # omit the param entirely in that case so the model uses its own default
+        # instead of erroring. Non-zero (retry-escalation) temperatures are still sent
+        # as before, for models that do support tuning it.
+        if temperature != 0:
+            parameters["temperature"] = temperature / 10
 
         if max_tokens is not None:
             # Patched (not upstream): newer OpenAI models (gpt-5.x family) reject
