@@ -96,6 +96,10 @@ def parse_mqm_answer(x, list_mqm_errors=False, full_desc=True):
         x = x.lower()
         errors = {'critical': [], 'major': [], 'minor': []}
         error_level = None
+        # Patched (not upstream): các category MQM hợp lệ theo đúng prompt few-shot.
+        # Dùng để lọc "đây có thật là 1 dòng lỗi không" bên dưới -- xem comment ở đó.
+        VALID_ERROR_PREFIXES = ('accuracy', 'fluency', 'locale convention', 'style',
+                                 'terminology', 'non-translation', 'other')
         for line in x.split('\n'):
             line = line.strip()
             if "no-error" in line or "no error" in line or "" == line:
@@ -110,12 +114,26 @@ def parse_mqm_answer(x, list_mqm_errors=False, full_desc=True):
                 error_level = "minor"
                 continue
 
+            # bỏ gạch đầu dòng/bullet ("- accuracy/omission - ...") trước khi so khớp
+            line_content = line.lstrip("-*• ").strip()
+
             if "critical" in line or "major" in line or "minor" in line:
-                if not any([line.startswith(x) for x in ['accuracy', 'fluency', 'locale convention', 'style', 'terminology', 'non-translation', 'other']]):
+                if not any(line_content.startswith(p) for p in VALID_ERROR_PREFIXES):
                     print(line)
 
             if error_level is None:
                 print(f"No error level for {line}")
+                continue
+
+            # Patched (not upstream): CHỈ tính là lỗi thật nếu dòng thực sự bắt đầu
+            # bằng 1 category MQM hợp lệ. Bug gốc: các câu KHẲNG ĐỊNH KHÔNG CÓ LỖI mà
+            # model hiện đại hay dùng ("no other major errors", "no critical errors
+            # identified", "no minor errors detected beyond the above") không khớp
+            # đúng chuỗi "no-error"/"no error" ở check phía trên, nên lọt xuống đây và
+            # bị append thẳng vào errors[error_level] -- tức 1 câu Ý NGHĨA TÍCH CỰC lại
+            # bị tính thành 1 lỗi CRITICAL/MAJOR/MINOR thật, kéo điểm sập sàn -25 dù
+            # bản dịch tốt. Yêu cầu prefix hợp lệ mới cho qua sẽ chặn đứng các câu này.
+            if not any(line_content.startswith(p) for p in VALID_ERROR_PREFIXES):
                 continue
 
             if "non-translation" in line:

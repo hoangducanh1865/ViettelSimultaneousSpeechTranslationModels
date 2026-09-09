@@ -26,3 +26,16 @@ predates:
   `Unsupported value: 'temperature' does not support 0.0 with this model. Only the default (1)
   value is supported`. Changed to omit `temperature` entirely when it's 0, letting the model use
   its own default; still sent for GEMBA's retry-escalated non-zero temperatures.
+
+**Local patch (deviates from upstream, real scoring bug)**: `gemba/gemba_mqm_utils.py`'s
+`parse_mqm_answer()` only recognized "no error" via the exact substrings `"no-error"`/`"no error"`.
+Modern models phrase this many other ways ("no other major errors", "no critical errors
+identified", "no minor errors detected beyond the above") -- none matched, so these clearly
+POSITIVE sentences fell through to the generic append-to-`errors[error_level]` branch and got
+counted as a real error (usually `critical`, since they commonly follow a `Critical:` header),
+capping the score at the -25 floor regardless of actual translation quality. Verified this was
+happening on real GEMBA-MQM runs in this project (near-uniform -25.0 scores across visibly good
+and bad translations alike). Fixed by requiring a line to start with one of the real MQM category
+names (`accuracy`, `fluency`, `locale convention`, `style`, `terminology`, `non-translation`,
+`other`, after stripping leading bullet chars) before counting it as an error at all -- matches
+the exact format the prompt's own few-shot examples use for genuine error lines.
