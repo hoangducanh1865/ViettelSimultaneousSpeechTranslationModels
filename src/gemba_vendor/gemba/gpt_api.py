@@ -144,7 +144,11 @@ class GptApi:
         }
 
         if max_tokens is not None:
-            parameters["max_tokens"] = max_tokens
+            # Patched (not upstream): newer OpenAI models (gpt-5.x family) reject
+            # `max_tokens` with "Unsupported parameter... Use 'max_completion_tokens'
+            # instead" -- max_completion_tokens is accepted by both old and new
+            # Chat Completions models, so use it unconditionally.
+            parameters["max_completion_tokens"] = max_tokens
 
         if isinstance(prompt, list):
             # check that prompt contain list of dictionaries with role and content

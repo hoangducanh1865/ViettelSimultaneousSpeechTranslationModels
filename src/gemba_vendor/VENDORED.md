@@ -16,3 +16,8 @@ implementation. Requires `OPENAI_API_KEY` (set by the calling notebook, not stor
 required by `get_gemba_scores`):
 - `mt-metrics-eval-v2/` (~79MB of WMT22 benchmark eval data, unrelated to this project's use case)
 - `gemba.egg-info/` (regenerable packaging build artifact)
+
+**Local patch (deviates from upstream)**: `gemba/gpt_api.py`'s `GptApi.call_api()` sent
+`max_tokens` (OpenAI's old Chat Completions param name) -- rejected outright by newer models
+(gpt-5.x family) with `Unsupported parameter: 'max_tokens'... Use 'max_completion_tokens'
+instead`. Changed to always send `max_completion_tokens`, which both old and new models accept.
