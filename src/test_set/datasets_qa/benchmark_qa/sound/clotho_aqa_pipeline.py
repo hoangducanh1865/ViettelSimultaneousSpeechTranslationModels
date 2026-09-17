@@ -36,12 +36,18 @@ import argparse
 import json
 import random
 import re
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
 from tqdm.auto import tqdm
+
+# Bootstrap sys.path for the split-directory layout: this file lives in .../sound/, but
+# translate_dataset.py sits 2 levels up (datasets_qa/) -- not on sys.path by default when Colab
+# runs `!python .../clotho_aqa_pipeline.py` directly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
 

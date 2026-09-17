@@ -30,12 +30,21 @@ import csv
 import json
 import random
 import re
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
 from tqdm.auto import tqdm
+
+# Bootstrap sys.path for the split-directory layout: this file lives in .../tu_muon/, but
+# knowledge_graph.py sits 1 level up (cac_hien_tuong_dac_biet_trong_tieng_viet/) and
+# translate_dataset.py sits 4 levels up (datasets_qa/) -- neither is on sys.path by default when
+# Colab runs `!python .../tu_muon_pipeline.py` directly.
+_THIS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_THIS_DIR.parent))
+sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
