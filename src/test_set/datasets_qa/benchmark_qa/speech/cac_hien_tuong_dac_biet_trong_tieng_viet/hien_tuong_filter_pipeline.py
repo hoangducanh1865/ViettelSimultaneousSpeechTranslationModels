@@ -151,16 +151,26 @@ def _load_samples_from_ledger(path: Path) -> list[dict]:
 
 
 def _load_samples_from_full_transcripts(path: Path) -> list[dict]:
-    """full_transcripts.json (bản Drive của stuff/benchmark_qa/release_hf_transcripts_by_dataset.json):
-    dict {dataset_name: [{"audio": str, "transcript": str}, ...]} -- 20 dataset, phủ rộng hơn
-    nhiều so với vlsp+ledger (bao gồm cả các dataset KHÔNG có trong ledger, ví dụ ViSEC/vietmed/
-    vimd). "dataset" lấy TRỰC TIẾP từ key ngoài cùng (không path-parse như vlsp/ledger), vì
-    "audio" ở đây dùng tiền tố "release_hf/speech/..." khác hẳn quy ước audio_filepath của
-    vlsp/ledger -- path-parse sẽ cho sai dataset name."""
+    """full_transcripts.json chấp nhận CẢ 2 dạng:
+      (a) list phẳng [{"dataset": str, "transcript": str, ...}, ...] -- dạng THẬT của file này
+          trên Drive/local hiện tại (94k+ entry, "dataset" là field trong từng object).
+      (b) dict {dataset_name: [{"audio": str, "transcript": str}, ...]} -- dạng
+          release_hf_transcripts_by_dataset.json gốc, giữ tương thích ngược nếu ai đó dùng bản
+          đó thay vì bản list phẳng."""
     with open(path, encoding="utf-8") as f:
-        by_dataset = json.load(f)
+        data = json.load(f)
+
     samples = []
-    for dataset_name, entries in by_dataset.items():
+    if isinstance(data, list):
+        for item in data:
+            if item.get("transcript"):
+                samples.append({
+                    "transcript": item["transcript"], "audio_filepath": item.get("audio"),
+                    "dataset": item.get("dataset", "unknown"), "source_file": item.get("source_file", path.name),
+                })
+        return samples
+
+    for dataset_name, entries in data.items():
         for item in entries:
             if item.get("transcript"):
                 samples.append({
