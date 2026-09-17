@@ -66,7 +66,7 @@ DEFAULT_MAX_RETRIES = 3
 
 _QUOTE_RE = re.compile(r'"([^"]+)"')
 
-FIELDS_TO_FILL = ["task", "split", "category", "subcategory", "subsubcategory", "difficulty"]
+FIELDS_TO_FILL = ["task", "split", "category", "sub-category", "sub-sub-category", "difficulty"]
 
 
 # ============================================================================================
@@ -379,6 +379,12 @@ def generate_questions(
                     "transcript": r["transcript"],
                     "historical_fact": r.get("historical_fact") if target_level == 3 else None,
                     "dataset": r.get("dataset"),
+                    # Chỉ có giá trị THẬT cho record từ build-new-word-records (đã điền sẵn, vì
+                    # id "hv-new-..." không tồn tại trong test_speech.jsonl nên fill-fields sẽ
+                    # bỏ qua) -- record từ 95 câu gốc thì các field này là None ở đây, sẽ được
+                    # fill-fields điền đúng giá trị THẬT ngay sau bước này.
+                    "task": r.get("task"), "split": r.get("split"), "category": r.get("category"),
+                    "sub-category": r.get("sub-category"), "difficulty": r.get("difficulty"),
                 }
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 n_written += 1
@@ -433,6 +439,56 @@ def fill_fields(multihop_path: Path, original_path: Path) -> None:
 
 
 # ============================================================================================
+# Step 0 (bổ sung, TRƯỚC classify-levels): build-new-word-records
+#
+# 95 record gốc của han_viet_qa.jsonl là 1 danh sách CỐ ĐỊNH -- knowledge graph (mục "Tri thức
+# nền") có thể debate/xác thực/THÊM những từ Hán Việt hoàn toàn MỚI (status="added") mà 95 record
+# đó không hề có, nên classify-levels/generate-questions KHÔNG BAO GIỜ sinh được câu hỏi cho
+# những từ mới đó nếu chỉ đọc han_viet_qa.jsonl. Bước này lấp lỗ hổng: nhận input là output của
+# `hien_tuong_filter_pipeline.py build-samples` (quét 1 corpus THẬT SỰ CÓ AUDIO, ví dụ
+# release_hf_transcripts_by_dataset.json -- KHÔNG dùng full_transcripts.json vì file đó không có
+# field "audio") trên CSV do `apply_knowledge_graph.py` xuất ra từ knowledge graph, rồi build
+# thẳng record đã có max_level/historical_fact (lấy TỪ knowledge graph, không gọi Gemini lại vì
+# những từ này đã được 3-model debate xác thực) -- ghi THÊM (append) vào chính file
+# --output của classify-levels, để generate-questions đọc 1 lần là ra cả 95 record cũ VÀ các từ
+# mới cùng lúc.
+# ============================================================================================
+
+def build_new_word_records(samples: list[dict], list_key: str = "han_viet_xuat_hien", id_prefix: str = "hv-new") -> list[dict]:
+    """samples: output của `hien_tuong_filter_pipeline.py build-samples` (mỗi sample có field
+    list_key -- list các từ Hán Việt MỚI tìm thấy thật trong transcript của sample đó, kèm
+    fields tu/meaning/category_hint/historical_fact lấy từ CSV do apply_knowledge_graph.py xuất
+    ra). Trả về record ở ĐÚNG schema mà classify-levels ghi ra (id/target_word/transcript/answer/
+    max_level/historical_fact/level_reason + audio/audio_id/dataset/task/split/category/
+    sub-category/difficulty đã điền sẵn -- KHÔNG cần fill-fields nữa vì các id "hv-new-..." này
+    không tồn tại trong test_speech.jsonl gốc, fill-fields sẽ bỏ qua chúng)."""
+    records = []
+    for i, s in enumerate(samples):
+        found = s.get(list_key) or []
+        for j, item in enumerate(found):
+            fact = item.get("historical_fact") or None
+            category_hint = item.get("category_hint") or None
+            max_level = 3 if fact else (2 if category_hint else 1)
+            audio = s.get("audio") or s.get("audio_filepath")
+            records.append({
+                "id": f"{id_prefix}-{i + 1:04d}-w{j}",
+                "target_word": item["tu"],
+                "answer": item.get("meaning", ""),
+                "transcript": s.get("transcript") or s.get("text") or "",
+                "audio": audio,
+                "audio_id": s.get("audio_id") or audio,
+                "max_level": max_level,
+                "historical_fact": fact,
+                "level_reason": "Từ MỚI đã được 3-model debate xác thực (knowledge graph) và tìm "
+                                "thấy thật trong transcript qua build-samples -- không gọi Gemini tự phân loại lại.",
+                "dataset": s.get("dataset"),
+                "task": "speech", "split": "test", "category": "Reasoning",
+                "sub-category": "Hiện tượng đặc biệt trong tiếng Việt", "difficulty": {1: "easy", 2: "medium", 3: "hard"}[max_level],
+            })
+    return records
+
+
+# ============================================================================================
 # CLI
 # ============================================================================================
 
@@ -444,6 +500,11 @@ def _load_jsonl(path: Path) -> list[dict]:
 def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p0 = sub.add_parser("build-new-word-records", help="Ghép thêm record cho từ MỚI (knowledge graph) vào file --append-to của classify-levels.")
+    p0.add_argument("--samples", required=True, help="Output của hien_tuong_filter_pipeline.py build-samples (dùng corpus CÓ audio, ví dụ release_hf_transcripts_by_dataset.json).")
+    p0.add_argument("--list-key", default="han_viet_xuat_hien")
+    p0.add_argument("--append-to", required=True, help="han_viet_difficulty_levels.jsonl (file --output của classify-levels -- ghi THÊM vào cuối).")
 
     p1 = sub.add_parser("classify-levels", help="Phân loại độ khó 1/2/3-hop cho từng sample.")
     p1.add_argument("--service-account-json", required=True)
@@ -471,7 +532,16 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = parser.parse_args(argv)
 
-    if args.command == "classify-levels":
+    if args.command == "build-new-word-records":
+        with open(args.samples, encoding="utf-8") as f:
+            samples = json.load(f)
+        new_records = build_new_word_records(samples, list_key=args.list_key)
+        with open(args.append_to, "a", encoding="utf-8") as f:
+            for r in new_records:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(f"Đã ghi thêm {len(new_records)} record từ MỚI vào {args.append_to}.")
+
+    elif args.command == "classify-levels":
         client = load_gemini_client(args.service_account_json)
         records = _load_jsonl(Path(args.input))
         print(f"Đã đọc {len(records)} sample từ {args.input}")
