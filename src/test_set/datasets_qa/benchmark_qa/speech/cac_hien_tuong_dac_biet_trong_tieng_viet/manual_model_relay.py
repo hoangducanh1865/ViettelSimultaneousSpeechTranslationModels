@@ -2,11 +2,17 @@
 Claude web) to build ONE task's knowledge-graph JSON (see knowledge_graph.py for the schema).
 
 NO paid API calls, NO OpenAI/Anthropic/Google SDK usage, NO network calls of any kind -- this
-module only builds prompt text (printed for a human to copy into a model's web chat), reads the
-human's pasted reply back via input(), and accumulates/parses state locally. This is a deliberate
-cost-control decision: knowledge-building happens rarely (once per task, or whenever a human
-wants to refresh it), while the actual bulk question generation downstream still uses the cheap
-Gemini API (gemini-3.1-flash-lite) unchanged.
+module only builds prompt text, and hands it off via a pair of relay FILES rather than printing
+it straight to the terminal (a turn's prompt/response can be many KB -- unwieldy to read/paste
+through a terminal buffer):
+  - --prompt-file: this script WRITES the current turn's prompt here. The human opens this file,
+    copies its ENTIRE content, and pastes it into the model's web chat (Gemini/ChatGPT/Claude).
+  - --response-file: the human pastes the model's reply into this file and saves it. The script
+    only asks a short "đã dán xong chưa?" confirmation via input() (never the reply text itself),
+    then reads the file.
+This is a deliberate cost-control decision: knowledge-building happens rarely (once per task, or
+whenever a human wants to refresh it), while the actual bulk question generation downstream still
+uses the cheap Gemini API (gemini-3.1-flash-lite) unchanged.
 
 MUST run in a REAL LOCAL TERMINAL: input() needs interactive stdin, which Colab's `!python ...`
 shell-out cannot provide -- this can never be a notebook cell.
@@ -21,7 +27,9 @@ Usage:
     python manual_model_relay.py run --task tu_lay --variant toan_bo \\
         --seed-json debate_seed_tu_lay_toan_bo.json \\
         --state-output relay_state_tu_lay_toan_bo.json \\
-        --knowledge-output knowledge_tu_lay_toan_bo.json
+        --knowledge-output knowledge_tu_lay_toan_bo.json \\
+        --prompt-file relay_prompt_tu_lay_toan_bo.txt \\
+        --response-file relay_response_tu_lay_toan_bo.txt
 
     python manual_model_relay.py show --state relay_state_tu_lay_toan_bo.json
 """
@@ -117,26 +125,40 @@ def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: Rela
 
 def run_turn(
     task: str, variant: Optional[str], seed: dict, state: RelayState, model: str, *,
+    prompt_path: Path, response_path: Path,
     input_fn: Callable[[str], str] = input, print_fn: Callable[[str], None] = print,
 ) -> Turn:
+    """Ghi prompt vào prompt_path (KHÔNG in ra terminal -- prompt/response có thể dài hàng chục
+    KB, bất tiện copy/paste qua buffer terminal). Xóa response_path CŨ trước (tránh đọc nhầm câu
+    trả lời của lượt trước nếu người dùng quên ghi đè). input_fn() chỉ hỏi xác nhận NGẮN đã dán
+    xong chưa, không nhận trực tiếp nội dung dài qua stdin."""
     prompt = build_turn_prompt(task, variant, seed, state, model)
-    print_fn("\n" + "=" * 88)
-    print_fn(prompt)
-    print_fn("=" * 88)
+    prompt_path.write_text(prompt, encoding="utf-8")
+    if response_path.exists():
+        response_path.unlink()
 
     round_index = len(state.turns) // len(state.model_order) + 1
     turn_index = len(state.turns) + 1
 
+    print_fn(f"\n>>> Round {round_index}, lượt của {model.upper()}:")
+    print_fn(f"    1. Mở {prompt_path}, copy TOÀN BỘ nội dung, dán vào {model.upper()} (web).")
+    print_fn(f"    2. Dán câu trả lời của {model.upper()} vào {response_path} rồi lưu file lại.")
+
     while True:
-        response = input_fn(f"\nDán câu trả lời của {model.upper()} vào đây (hoặc gõ {_SKIP_SENTINEL} nếu paste hỏng):\n")
-        if response.strip().upper() == _SKIP_SENTINEL:
-            turn = Turn(round_index, turn_index, model, prompt, response, None, None)
+        answer = input_fn(f"Đã dán xong câu trả lời vào {response_path.name}? (Enter để đọc tiếp, gõ {_SKIP_SENTINEL} để bỏ qua lượt này): ")
+        if answer.strip().upper() == _SKIP_SENTINEL:
+            turn = Turn(round_index, turn_index, model, prompt, "", None, None)
             state.turns.append(turn)
             return turn
 
+        if not response_path.exists() or not response_path.read_text(encoding="utf-8").strip():
+            print_fn(f"[LỖI] {response_path} vẫn trống -- dán câu trả lời vào file rồi Enter lại, hoặc gõ {_SKIP_SENTINEL}.")
+            continue
+
+        response = response_path.read_text(encoding="utf-8")
         parsed = extract_knowledge_json(response)
         if parsed is None:
-            print_fn(f"[LỖI] Không tìm/parse được khối ```json``` hợp lệ trong câu trả lời -- dán lại, hoặc gõ {_SKIP_SENTINEL}.")
+            print_fn(f"[LỖI] Không tìm/parse được khối ```json``` hợp lệ trong {response_path} -- sửa lại file rồi Enter, hoặc gõ {_SKIP_SENTINEL}.")
             continue
 
         vote = extract_consensus_vote(response)
@@ -148,12 +170,16 @@ def run_turn(
 
 def run_round(
     task: str, variant: Optional[str], seed: dict, state: RelayState, *,
+    prompt_path: Path, response_path: Path,
     input_fn: Callable[[str], str] = input, print_fn: Callable[[str], None] = print,
 ) -> bool:
     """Chạy đủ len(state.model_order) turn. Trả True nếu CẢ round này mọi turn đều vote FINAL."""
     votes = []
     for model in state.model_order:
-        turn = run_turn(task, variant, seed, state, model, input_fn=input_fn, print_fn=print_fn)
+        turn = run_turn(
+            task, variant, seed, state, model,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn, print_fn=print_fn,
+        )
         votes.append(turn.consensus_vote)
     return all(v == "FINAL" for v in votes)
 
@@ -161,6 +187,7 @@ def run_round(
 def run_relay(
     task: str, seed: dict, *, variant: Optional[str] = None,
     model_order: list[str] = None, max_rounds: int = DEFAULT_MAX_ROUNDS,
+    prompt_path: Path, response_path: Path,
     input_fn: Callable[[str], str] = input, print_fn: Callable[[str], None] = print,
     resume_state: Optional[RelayState] = None,
 ) -> RelayState:
@@ -168,7 +195,10 @@ def run_relay(
 
     rounds_done = len(state.turns) // len(state.model_order)
     for _ in range(rounds_done, state.max_rounds):
-        consensus = run_round(task, variant, seed, state, input_fn=input_fn, print_fn=print_fn)
+        consensus = run_round(
+            task, variant, seed, state,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn, print_fn=print_fn,
+        )
         if consensus:
             state.stopped_reason = "consensus"
             print_fn(f"\n>>> Cả {len(state.model_order)} model đồng thuận CONSENSUS: FINAL -- dừng relay.")
@@ -240,6 +270,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--seed-json", required=True)
     p1.add_argument("--state-output", required=True)
     p1.add_argument("--knowledge-output", required=True)
+    p1.add_argument("--prompt-file", default=None, help="File trung chuyển để COPY prompt ra web (mặc định: relay_prompt_<task>[_<variant>].txt cạnh --state-output).")
+    p1.add_argument("--response-file", default=None, help="File trung chuyển để PASTE câu trả lời model vào (mặc định: relay_response_<task>[_<variant>].txt cạnh --state-output).")
     p1.add_argument("--model-order", default=",".join(DEFAULT_MODEL_ORDER), help="Danh sách model, phân tách bởi dấu phẩy.")
     p1.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     p1.add_argument("--resume", action="store_true", help="Tiếp tục từ --state-output nếu đã tồn tại.")
@@ -259,9 +291,14 @@ def main(argv: Optional[list[str]] = None) -> None:
             resume_state = load_state(state_path)
             print(f"Resume từ {state_path}: đã có {len(resume_state.turns)} turn.")
 
+        suffix = f"_{args.task}" + (f"_{args.variant}" if args.variant else "")
+        prompt_path = Path(args.prompt_file) if args.prompt_file else state_path.with_name(f"relay_prompt{suffix}.txt")
+        response_path = Path(args.response_file) if args.response_file else state_path.with_name(f"relay_response{suffix}.txt")
+
         state = run_relay(
             args.task, seed, variant=args.variant, model_order=args.model_order.split(","),
-            max_rounds=args.max_rounds, resume_state=resume_state,
+            max_rounds=args.max_rounds, prompt_path=prompt_path, response_path=response_path,
+            resume_state=resume_state,
         )
         save_state(state, state_path)
         export_knowledge_graph(state, args.task, args.variant, Path(args.knowledge_output))
