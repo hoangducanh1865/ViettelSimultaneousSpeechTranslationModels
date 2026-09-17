@@ -36,6 +36,7 @@ from typing import Optional
 
 from tqdm.auto import tqdm
 
+from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 20
@@ -109,12 +110,19 @@ def _classify_region_batch(client, model, batch, max_retries):
 
 def classify_region(
     client, model, records: list[dict], output_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[dict]:
     """Resumable: đọc lại output_path nếu đã có, chỉ phân loại tiếp phần chưa có. Trả về BẢN
-    SAO của records với region_identified/region_or_ethnic_group/region_reason đã điền."""
+    SAO của records với region_identified/region_or_ethnic_group/region_reason đã điền.
+
+    knowledge_graph=None (mặc định) -> hành vi CŨ y hệt (an toàn ngược). Khi có, từ đã được 3
+    model debate xác thực (words_index) LUÔN được dùng trực tiếp -- không gọi Gemini lại, và ưu
+    tiên HƠN cả cache của lần chạy trước (knowledge graph coi là nguồn đáng tin hơn 1 lần tự
+    quyết định đơn lẻ của Gemini)."""
     records = [dict(r) for r in records]
+    kg_words = words_index(knowledge_graph) if knowledge_graph else {}
 
     cache: dict = {}
     if output_path.exists():
@@ -125,7 +133,10 @@ def classify_region(
                     cache[cached["id"]] = cached
         print(f"Đã có sẵn {len(cache)} sample đã phân loại trong {output_path} -- resume.")
 
-    pending = [r for r in records if r["id"] not in cache]
+    pending = [r for r in records if r["id"] not in cache and r["answer"] not in kg_words]
+    n_from_kg = sum(1 for r in records if r["answer"] in kg_words)
+    if kg_words:
+        print(f"{n_from_kg}/{len(records)} sample dùng trực tiếp dữ kiện đã debate xác thực từ knowledge graph.")
     print(f"Cần phân loại vùng/dân tộc cho {len(pending)}/{len(records)} sample.")
 
     if pending:
@@ -136,6 +147,13 @@ def classify_region(
                 cache.update(future.result())
 
     for r in records:
+        if r["answer"] in kg_words:
+            entry = kg_words[r["answer"]]
+            region = entry.get("fields", {}).get("region_or_ethnic_group")
+            r["region_identified"] = bool(region)
+            r["region_or_ethnic_group"] = region
+            r["region_reason"] = f"Từ knowledge graph (source={entry.get('source')})."
+            continue
         res = cache.get(r["id"], {})
         # cache có thể ở 1 trong 2 dạng: dữ liệu THÔ từ API ("identified") hoặc record đã ghi
         # ra file ở lần chạy trước (đã đổi tên field thành "region_identified").
@@ -171,7 +189,7 @@ và PHẢI là 1 trong 4 choices) -- không giải thích thêm, không markdown
 """
 
 
-def _gen_region_qa_batch(client, model, batch, max_retries):
+def _gen_region_qa_batch(client, model, batch, max_retries, system_prompt):
     payload = [
         {"id": r["id"], "dialect_form": r["answer"], "region_or_ethnic_group": r["region_or_ethnic_group"]}
         for r in batch
@@ -186,7 +204,7 @@ def _gen_region_qa_batch(client, model, batch, max_retries):
                 model=model,
                 contents=json.dumps(payload, ensure_ascii=False),
                 config=types.GenerateContentConfig(
-                    system_instruction=REGION_QA_SYSTEM_PROMPT,
+                    system_instruction=system_prompt,
                     temperature=0.7,
                     max_output_tokens=8192,
                 ),
@@ -214,11 +232,15 @@ def _gen_region_qa_batch(client, model, batch, max_retries):
 
 def generate_questions(
     client, model, region_records: list[dict], output_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_GEN_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> None:
     """Sinh câu hỏi CHỈ cho sample có region_identified=True. Resumable (append, skip id đã
-    sinh xong)."""
+    sinh xong). knowledge_graph=None -> hành vi CŨ y hệt; khi có, nối thêm luật debate đã tinh
+    chỉnh vào system prompt (rule key "region") cho pha sinh hàng loạt."""
+    system_prompt = REGION_QA_SYSTEM_PROMPT + rule_addendum_text(knowledge_graph, "region")
+
     done_ids = set()
     if output_path.exists():
         with open(output_path, encoding="utf-8") as f:
@@ -234,7 +256,7 @@ def generate_questions(
     n_written = n_failed = 0
     with open(output_path, "a", encoding="utf-8") as f:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_gen_region_qa_batch, client, model, b, max_retries): b for b in batches}
+            futures = {executor.submit(_gen_region_qa_batch, client, model, b, max_retries, system_prompt): b for b in batches}
             for future in tqdm(as_completed(futures), total=len(futures), desc="sinh câu hỏi vùng/dân tộc"):
                 batch = futures[future]
                 results = future.result()
@@ -250,6 +272,7 @@ def generate_questions(
                         "choices": gen["choices"],
                         "answer": gen["answer"],
                         "transcript": r.get("transcript"),
+                        "question_type": "region-1-hop",
                         "region_or_ethnic_group": r["region_or_ethnic_group"],
                         "dataset": r.get("dataset"),
                         "category": r.get("category"),
@@ -280,6 +303,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--service-account-json", required=True)
     p1.add_argument("--input", required=True, help="phuong_ngu_qa.jsonl (đã có field transcript).")
     p1.add_argument("--output", required=True, help="phuong_ngu_region_labels.jsonl")
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
     p1.add_argument("--model", default=DEFAULT_MODEL)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -289,6 +313,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--service-account-json", required=True)
     p2.add_argument("--input", required=True, help="phuong_ngu_region_labels.jsonl")
     p2.add_argument("--output", required=True, help="phuong_ngu_region_qa.jsonl")
+    p2.add_argument("--knowledge-json", default=None)
     p2.add_argument("--model", default=DEFAULT_MODEL)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -303,16 +328,18 @@ def main(argv: Optional[list[str]] = None) -> None:
         n_no_transcript = sum(1 for r in records if r.get("transcript") is None)
         print(f"Đã đọc {len(records)} sample. {n_ambiguous} sample có transcript ghép MẬP MỜ, "
               f"{n_no_transcript} sample KHÔNG có transcript.")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         classify_region(
-            client, args.model, records, Path(args.output),
+            client, args.model, records, Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 
     elif args.command == "generate-questions":
         client = load_gemini_client(args.service_account_json)
         region_records = _load_jsonl(Path(args.input))
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, region_records, Path(args.output),
+            client, args.model, region_records, Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 

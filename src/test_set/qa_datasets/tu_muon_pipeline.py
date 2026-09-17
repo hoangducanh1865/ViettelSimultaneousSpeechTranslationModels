@@ -37,6 +37,7 @@ from typing import Optional
 
 from tqdm.auto import tqdm
 
+from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 25
@@ -343,14 +344,24 @@ def _build_word_entries(samples: list[dict], final_word_rows: dict) -> list[dict
 
 def classify_levels(
     client, model, samples: list[dict], csv_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[dict]:
+    """knowledge_graph=None -> hành vi CŨ y hệt (an toàn ngược). Khi có, từ mượn đã được 3 model
+    debate xác thực (words_index) dùng TRỰC TIẾP fields.historical_fact/nhom_linh_vuc đã debate
+    -- KHÔNG gọi Gemini tự quyết lại; từ chưa có trong kg vẫn rơi về đường Gemini-tự-quyết cũ."""
     final_word_rows = _load_word_rows(csv_path)
     entries = _build_word_entries(samples, final_word_rows)
-    print(f"Cần phân loại mức độ cho {len(entries)} (sample, từ mượn).")
+    kg_words = words_index(knowledge_graph) if knowledge_graph else {}
+    n_from_kg = sum(1 for e in entries if e["tu"] in kg_words)
+    if kg_words:
+        print(f"{n_from_kg}/{len(entries)} (sample, từ mượn) dùng trực tiếp dữ kiện đã debate xác thực từ knowledge graph.")
 
-    batches = [entries[i:i + batch_size] for i in range(0, len(entries), batch_size)]
+    pending = [e for e in entries if e["tu"] not in kg_words]
+    print(f"Cần Gemini phân loại mức độ cho {len(pending)} (sample, từ mượn).")
+
+    batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     level_results: dict = {}
     if batches:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -359,6 +370,15 @@ def classify_levels(
                 level_results.update(future.result())
 
     for e in entries:
+        if e["tu"] in kg_words:
+            entry = kg_words[e["tu"]]
+            fields = entry.get("fields", {})
+            fact = fields.get("historical_fact")
+            linh_vuc = fields.get("nhom_linh_vuc") or e["linh_vuc"]
+            e["max_level"] = 3 if fact else (2 if linh_vuc else 1)
+            e["historical_fact"] = fact
+            e["level_reason"] = f"Từ knowledge graph (source={entry.get('source')})."
+            continue
         res = level_results.get(e["id"], {"level_3_eligible": False, "historical_fact": None, "reason": "Không có kết quả."})
         if res.get("level_3_eligible") and res.get("historical_fact"):
             e["max_level"] = 3
@@ -374,7 +394,7 @@ def classify_levels(
     return entries
 
 
-def _gen_level3_batch(client, model, batch, max_retries):
+def _gen_level3_batch(client, model, batch, max_retries, system_prompt):
     # batch: list[(id_ghep, entry)]
     from google.genai import types
 
@@ -390,7 +410,7 @@ def _gen_level3_batch(client, model, batch, max_retries):
                 model=model,
                 contents=json.dumps(payload, ensure_ascii=False),
                 config=types.GenerateContentConfig(
-                    system_instruction=LEVEL3_SYSTEM_PROMPT, temperature=0.7, max_output_tokens=8192,
+                    system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
                 ),
             )
             raw = (response.text or "").strip()
@@ -428,15 +448,20 @@ def _record_common_fields(e: dict, id_ghep: str, level: int) -> dict:
         "difficulty": {1: "easy", 2: "medium", 3: "hard"}[level],
         "level": level,
         "max_level": e["max_level"],
+        "question_type": {1: "1-hop", 2: "2-hop", 3: "3-hop"}[level],
     }
 
 
 def generate_questions(
     client, model, entries: list[dict], csv_path: Path, output_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES, seed: int = 42,
 ) -> None:
+    """knowledge_graph=None -> hành vi CŨ y hệt; khi có, nối thêm luật debate đã tinh chỉnh vào
+    system prompt sinh câu hỏi level 3 (level 1/2 không gọi Gemini nên không có prompt để sửa)."""
     random.seed(seed)
+    level3_system_prompt = LEVEL3_SYSTEM_PROMPT + rule_addendum_text(knowledge_graph, "level_3")
     final_word_rows = _load_word_rows(csv_path)
     all_loanwords = list(final_word_rows.items())
     all_linh_vuc = sorted({(r.get("Nhóm Lĩnh Vực") or "").strip() for _, r in all_loanwords} - {""})
@@ -507,7 +532,7 @@ def generate_questions(
         batches = [level3_pending[i:i + batch_size] for i in range(0, len(level3_pending), batch_size)]
         level3_results: dict = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_gen_level3_batch, client, model, b, max_retries): b for b in batches}
+            futures = {executor.submit(_gen_level3_batch, client, model, b, max_retries, level3_system_prompt): b for b in batches}
             for future in tqdm(as_completed(futures), total=len(futures), desc="tu_muon sinh câu hỏi level 3"):
                 level3_results.update(future.result())
 
@@ -672,6 +697,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--samples", required=True, help="asr_samples_with_tu_muon.json")
     p1.add_argument("--csv", required=True, help="tu_muon_tieng_viet_viet_hoa_final.csv")
     p1.add_argument("--output", required=True, help="tu_muon_difficulty_levels.jsonl")
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
     p1.add_argument("--model", default=DEFAULT_MODEL)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -682,6 +708,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--input", required=True, help="tu_muon_difficulty_levels.jsonl")
     p2.add_argument("--csv", required=True, help="tu_muon_tieng_viet_viet_hoa_final.csv")
     p2.add_argument("--output", required=True, help="tu_muon_multihop_qa.jsonl")
+    p2.add_argument("--knowledge-json", default=None)
     p2.add_argument("--model", default=DEFAULT_MODEL)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -706,8 +733,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.samples, encoding="utf-8") as f:
             samples = json.load(f)
         print(f"Đã đọc {len(samples)} sample từ {args.samples}")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         entries = classify_levels(
-            client, args.model, samples, Path(args.csv),
+            client, args.model, samples, Path(args.csv), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -723,8 +751,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.input, encoding="utf-8") as f:
             entries = [json.loads(line) for line in f if line.strip()]
         print(f"Đã đọc {len(entries)} entry đã phân loại mức độ.")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, entries, Path(args.csv), Path(args.output),
+            client, args.model, entries, Path(args.csv), Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries, seed=args.seed,
         )
 

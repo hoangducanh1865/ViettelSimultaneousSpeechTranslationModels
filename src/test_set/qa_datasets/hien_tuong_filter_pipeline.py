@@ -7,24 +7,37 @@ ASR transcript sources, and produces (a) a "final" CSV containing only the words
 appear somewhere in the ASR transcripts, and (b) a JSON array of ASR samples annotated with
 which candidate word(s) were found in each sample's transcript, with full CSV metadata attached.
 
-MUST run LOCALLY, not on Colab: it reads stuff/benchmark_qa/asr_datasets/vlsp/*.json and
-asr_source_ledger.json, which live only on this machine (stuff/ is gitignored, never pushed to
-GitHub) -- Colab has no access to them. Run this script here, then upload the resulting
---out-csv/--out-json files to Google Drive for the Colab pipeline scripts (tu_muon_pipeline.py /
-tu_lay_pipeline.py) to consume.
+Two transcript sources, combinable (UNION, not either/or):
+  - vlsp/*.json + asr_source_ledger.json: LOCAL ONLY (stuff/ is gitignored, never pushed to
+    GitHub) -- Colab has no access to them. Run --vlsp-glob/--ledger here, then upload the
+    resulting --out-csv/--out-json files to Google Drive for Colab to consume.
+  - full_transcripts.json (--full-transcripts-json): a Drive-resident copy of
+    stuff/benchmark_qa/release_hf_transcripts_by_dataset.json (20 dataset, ~35k transcript,
+    broader dataset coverage than vlsp+ledger's ~12 dataset) -- because this file lives on
+    Drive, not in gitignored stuff/, every subcommand below can now ALSO run directly on Colab
+    when only --full-transcripts-json is given (no local-only step required).
 
-4 subcommands:
-  1. filter-csv       -- keep only candidate-CSV rows whose word/phrase appears (word-boundary
-                          match) somewhere in the ASR transcript corpus.
-  2. build-samples     -- for the "final" (filtered) CSV, scan every ASR sample's transcript and
-                          attach full CSV metadata for every candidate word found in it.
-  3. split-by-prefix    -- split a "final" CSV (and its build-samples output, if given) into 2
-                          groups by whether a given column's value STARTS WITH a given prefix
-                          (used to split từ láy into "toàn bộ" vs "vần" by the "Phân loại" column).
-  4. dedupe-samples     -- remove words from a samples file's per-sample word list if that SAME
-                          word already appears in one or more OTHER samples files (used to keep
-                          the "chung" từ láy samples from re-covering words already handled by
-                          the "toàn bộ"/"vần" samples); drops samples left with an empty list.
+6 subcommands:
+  1. filter-csv            -- keep only candidate-CSV rows whose word/phrase appears (word-
+                               boundary match) somewhere in the ASR transcript corpus.
+  2. build-samples          -- for the "final" (filtered) CSV, scan every ASR sample's transcript
+                               and attach full CSV metadata for every candidate word found in it.
+  3. split-by-prefix        -- split a "final" CSV (and its build-samples output, if given) into
+                               2 groups by whether a given column's value STARTS WITH a given
+                               prefix (used to split từ láy into "toàn bộ" vs "vần" by the
+                               "Phân loại" column).
+  4. dedupe-samples         -- remove words from a samples file's per-sample word list if that
+                               SAME word already appears in one or more OTHER samples files (used
+                               to keep the "chung" từ láy samples from re-covering words already
+                               handled by the "toàn bộ"/"vần" samples); drops samples left with an
+                               empty list.
+  5. word-coverage-report   -- per-word hit count/dataset breakdown/example transcripts across
+                               the scanned corpus -- evidence for build_debate_seed.py, and a way
+                               to see which candidate words are dead weight (0 hits) before
+                               spending a debate round on them.
+  6. build-cloze-samples    -- (từ láy toàn bộ only) keep samples containing a word's BASE
+                               (un-reduplicated) syllable but NOT its full reduplicated form --
+                               prerequisite for tu_lay_pipeline.py's generate-cloze-questions.
 
 Usage (Từ mượn):
     python hien_tuong_filter_pipeline.py filter-csv \\
@@ -137,17 +150,55 @@ def _load_samples_from_ledger(path: Path) -> list[dict]:
     return samples
 
 
-def load_corpus_and_samples(vlsp_glob: str, ledger_path: Path) -> tuple[str, list[dict]]:
-    """Trả về (corpus_normalized, all_samples) -- dùng chung cho cả filter-csv và build-samples
-    để đảm bảo 2 bước luôn thấy CÙNG 1 nguồn transcript."""
-    vlsp_paths = sorted(glob.glob(vlsp_glob))
+def _load_samples_from_full_transcripts(path: Path) -> list[dict]:
+    """full_transcripts.json (bản Drive của stuff/benchmark_qa/release_hf_transcripts_by_dataset.json):
+    dict {dataset_name: [{"audio": str, "transcript": str}, ...]} -- 20 dataset, phủ rộng hơn
+    nhiều so với vlsp+ledger (bao gồm cả các dataset KHÔNG có trong ledger, ví dụ ViSEC/vietmed/
+    vimd). "dataset" lấy TRỰC TIẾP từ key ngoài cùng (không path-parse như vlsp/ledger), vì
+    "audio" ở đây dùng tiền tố "release_hf/speech/..." khác hẳn quy ước audio_filepath của
+    vlsp/ledger -- path-parse sẽ cho sai dataset name."""
+    with open(path, encoding="utf-8") as f:
+        by_dataset = json.load(f)
+    samples = []
+    for dataset_name, entries in by_dataset.items():
+        for item in entries:
+            if item.get("transcript"):
+                samples.append({
+                    "transcript": item["transcript"], "audio_filepath": item.get("audio"),
+                    "dataset": dataset_name, "source_file": path.name,
+                })
+    return samples
+
+
+def load_corpus_and_samples(
+    vlsp_glob: Optional[str] = None, ledger_path: Optional[Path] = None,
+    full_transcripts_json: Optional[Path] = None,
+) -> tuple[str, list[dict]]:
+    """Trả về (corpus_normalized, all_samples) -- dùng chung cho filter-csv/build-samples/
+    word-coverage-report/build-cloze-samples để đảm bảo mọi bước luôn thấy CÙNG 1 nguồn
+    transcript. Cần ít nhất 1 trong 2 nguồn: (vlsp_glob + ledger_path) và/hoặc
+    full_transcripts_json -- gọi CẢ HAI để quét UNION của 2 phạm vi (mở rộng, không thay thế
+    phạm vi vlsp+ledger cũ)."""
+    if not (vlsp_glob and ledger_path) and not full_transcripts_json:
+        raise ValueError("Cần ít nhất 1 nguồn: (--vlsp-glob + --ledger) và/hoặc --full-transcripts-json.")
+
     all_samples: list[dict] = []
-    for p in vlsp_paths:
-        all_samples.extend(_load_samples_from_vlsp_jsonl(Path(p)))
-    all_samples.extend(_load_samples_from_ledger(ledger_path))
+    n_vlsp_files = 0
+    if vlsp_glob and ledger_path:
+        vlsp_paths = sorted(glob.glob(vlsp_glob))
+        n_vlsp_files = len(vlsp_paths)
+        for p in vlsp_paths:
+            all_samples.extend(_load_samples_from_vlsp_jsonl(Path(p)))
+        all_samples.extend(_load_samples_from_ledger(ledger_path))
+        print(f"Đã load {len(all_samples)} sample từ {n_vlsp_files} file vlsp + 1 file ledger.")
+
+    if full_transcripts_json:
+        n_before = len(all_samples)
+        all_samples.extend(_load_samples_from_full_transcripts(full_transcripts_json))
+        print(f"Đã load thêm {len(all_samples) - n_before} sample từ {full_transcripts_json.name}.")
 
     corpus_normalized = "\n".join(normalize_for_match(s["transcript"]) for s in all_samples)
-    print(f"Đã load {len(all_samples)} sample gốc từ {len(vlsp_paths)} file vlsp + 1 file ledger.")
+    print(f"Tổng: {len(all_samples)} sample trong corpus quét.")
     return corpus_normalized, all_samples
 
 
@@ -302,6 +353,91 @@ def dedupe_samples(samples_path: Path, list_key: str, word_key: str, against_pat
 
 
 # ============================================================================================
+# Subcommand 5: word-coverage-report
+# ============================================================================================
+
+def word_coverage_report(
+    words: list[str], all_samples: list[dict], corpus_normalized: str, *, max_examples_per_word: int = 3,
+) -> dict[str, dict]:
+    """Với mỗi từ candidate, đếm số lần xuất hiện + phân bố theo dataset + vài transcript ví dụ.
+    Dùng để (a) cấp bằng chứng THẬT cho build_debate_seed.py (không bịa), (b) lộ ra ngay từ nào
+    0 hit trong TOÀN BỘ corpus đã quét (kể cả sau khi mở rộng full_transcripts.json) -- những từ
+    này không đáng đưa vào 1 vòng debate, và (c) định lượng full_transcripts.json thực sự tăng
+    thêm bao nhiêu sample dùng được cho mỗi từ (kiểm tra sizing benchmark)."""
+    report: dict[str, dict] = {}
+    for w in words:
+        w_norm = normalize_for_match(w)
+        hits_by_dataset: dict[str, int] = {}
+        examples: list[str] = []
+        for s in all_samples:
+            transcript_norm = normalize_for_match(s["transcript"])
+            if not word_appears_in_corpus(w, transcript_norm):
+                continue
+            dataset = s.get("dataset") or s.get("source_file") or "unknown"
+            hits_by_dataset[dataset] = hits_by_dataset.get(dataset, 0) + 1
+            if len(examples) < max_examples_per_word:
+                examples.append(s["transcript"])
+        report[w] = {
+            "total_hits": sum(hits_by_dataset.values()),
+            "hits_by_dataset": hits_by_dataset,
+            "example_transcripts": examples,
+        }
+
+    n_zero_hit = sum(1 for v in report.values() if v["total_hits"] == 0)
+    print(f"Đã kiểm tra {len(words)} từ trong {len(all_samples)} sample -- "
+          f"{n_zero_hit} từ KHÔNG xuất hiện dù chỉ 1 lần.")
+    return report
+
+
+# ============================================================================================
+# Subcommand 6: build-cloze-samples (chỉ dùng cho từ láy toàn bộ -- xem tu_lay_pipeline.py)
+# ============================================================================================
+
+def build_cloze_samples(
+    csv_path: Path, word_col: str, base_word_col: str, all_samples: list[dict], corpus_normalized: str,
+    list_key: str, out_json: Path,
+) -> None:
+    """Với mỗi dòng CSV từ láy toàn bộ, giữ sample có TỪ GỐC (chưa láy, base_word_col) trong
+    transcript NHƯNG KHÔNG có từ láy đầy đủ (word_col) -- nếu transcript đã chứa sẵn từ láy đầy
+    đủ thì câu hỏi cloze (điền vào chỗ trống) sẽ lộ đáp án ngay trong audio, làm câu hỏi vô
+    nghĩa. Dùng CHÍNH word_appears_in_corpus đã có, không viết matcher riêng."""
+    word_rows: dict[str, dict] = {}
+    with open(csv_path, encoding="utf-8-sig", newline="") as f:
+        for row in csv.DictReader(f):
+            w = row[word_col].strip()
+            base = row.get(base_word_col, "").strip()
+            if w and base:
+                word_rows[w] = row
+
+    print(f"Đã load {len(word_rows)} từ láy toàn bộ có cột {base_word_col!r} từ {csv_path}.")
+
+    matched_samples = []
+    for sample in all_samples:
+        transcript_norm = normalize_for_match(sample["transcript"])
+        found = [
+            w for w, row in word_rows.items()
+            if word_appears_in_corpus(row[base_word_col].strip(), transcript_norm)
+            and not word_appears_in_corpus(w, transcript_norm)
+        ]
+        if not found:
+            continue
+        new_sample = dict(sample)
+        new_sample[list_key] = [
+            {"tu": w, "base_word": word_rows[w][base_word_col], "phan_loai": word_rows[w].get("Phân loại", ""),
+             "y_nghia": word_rows[w].get("Ý nghĩa", ""), "sac_thai_bieu_dat": word_rows[w].get("Sắc thái biểu đạt", "")}
+            for w in found
+        ]
+        matched_samples.append(new_sample)
+
+    print(f"Giữ lại {len(matched_samples)}/{len(all_samples)} sample có từ GỐC (chưa láy) "
+          f"nhưng KHÔNG có từ láy đầy đủ trong transcript.")
+
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(matched_samples, f, ensure_ascii=False, indent=2)
+    print(f"Đã lưu {out_json} ({len(matched_samples)} sample).")
+
+
+# ============================================================================================
 # CLI
 # ============================================================================================
 
@@ -312,15 +448,17 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1 = sub.add_parser("filter-csv")
     p1.add_argument("--src-csv", required=True)
     p1.add_argument("--word-col", required=True)
-    p1.add_argument("--vlsp-glob", required=True)
-    p1.add_argument("--ledger", required=True)
+    p1.add_argument("--vlsp-glob", default=None)
+    p1.add_argument("--ledger", default=None)
+    p1.add_argument("--full-transcripts-json", default=None, help="Bản Drive của release_hf_transcripts_by_dataset.json -- quét THÊM (không thay) vlsp+ledger.")
     p1.add_argument("--out-csv", required=True)
 
     p2 = sub.add_parser("build-samples")
     p2.add_argument("--csv", required=True)
     p2.add_argument("--word-col", required=True)
-    p2.add_argument("--vlsp-glob", required=True)
-    p2.add_argument("--ledger", required=True)
+    p2.add_argument("--vlsp-glob", default=None)
+    p2.add_argument("--ledger", default=None)
+    p2.add_argument("--full-transcripts-json", default=None)
     p2.add_argument("--metadata-cols", required=True, help='JSON object {"json_key": "csv_column_name", ...}')
     p2.add_argument("--list-key", required=True, help='vd "tu_muon_xuat_hien" hoặc "tu_lay_xuat_hien"')
     p2.add_argument("--out-json", required=True)
@@ -345,14 +483,34 @@ def main(argv: Optional[list[str]] = None) -> None:
     p4.add_argument("--against", action="append", required=True, help="Lặp lại cờ này cho mỗi file cần loại trừ.")
     p4.add_argument("--output", required=True)
 
+    p5 = sub.add_parser("word-coverage-report", help="Đếm số lần mỗi từ candidate xuất hiện trong corpus -- bằng chứng cho debate seed.")
+    p5.add_argument("--csv", default=None)
+    p5.add_argument("--word-col", default=None)
+    p5.add_argument("--words-json", default=None, help='Thay thế --csv/--word-col: file JSON list[str] các từ (dùng khi chưa có CSV, ví dụ Hán Việt).')
+    p5.add_argument("--vlsp-glob", default=None)
+    p5.add_argument("--ledger", default=None)
+    p5.add_argument("--full-transcripts-json", default=None)
+    p5.add_argument("--max-examples-per-word", type=int, default=3)
+    p5.add_argument("--out-json", required=True)
+
+    p6 = sub.add_parser("build-cloze-samples", help="Chỉ dùng cho từ láy toàn bộ -- xem tu_lay_pipeline.py generate-cloze-questions.")
+    p6.add_argument("--csv", required=True)
+    p6.add_argument("--word-col", required=True)
+    p6.add_argument("--base-word-col", required=True)
+    p6.add_argument("--vlsp-glob", default=None)
+    p6.add_argument("--ledger", default=None)
+    p6.add_argument("--full-transcripts-json", default=None)
+    p6.add_argument("--list-key", required=True)
+    p6.add_argument("--out-json", required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "filter-csv":
-        corpus, _ = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger))
+        corpus, _ = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger) if args.ledger else None, Path(args.full_transcripts_json) if args.full_transcripts_json else None)
         filter_csv(Path(args.src_csv), args.word_col, corpus, Path(args.out_csv))
 
     elif args.command == "build-samples":
-        corpus, all_samples = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger))
+        corpus, all_samples = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger) if args.ledger else None, Path(args.full_transcripts_json) if args.full_transcripts_json else None)
         metadata_cols = json.loads(args.metadata_cols)
         build_samples(Path(args.csv), args.word_col, all_samples, corpus, metadata_cols, args.list_key, Path(args.out_json))
 
@@ -366,6 +524,24 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     elif args.command == "dedupe-samples":
         dedupe_samples(Path(args.samples), args.list_key, args.word_key, [Path(p) for p in args.against], Path(args.output))
+
+    elif args.command == "word-coverage-report":
+        corpus, all_samples = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger) if args.ledger else None, Path(args.full_transcripts_json) if args.full_transcripts_json else None)
+        if args.words_json:
+            with open(args.words_json, encoding="utf-8") as f:
+                words = json.load(f)
+        else:
+            assert args.csv and args.word_col, "Cần --csv + --word-col, hoặc --words-json."
+            with open(args.csv, encoding="utf-8-sig", newline="") as f:
+                words = [r[args.word_col].strip() for r in csv.DictReader(f) if r[args.word_col].strip()]
+        report = word_coverage_report(words, all_samples, corpus, max_examples_per_word=args.max_examples_per_word)
+        with open(args.out_json, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"Đã lưu {args.out_json}.")
+
+    elif args.command == "build-cloze-samples":
+        corpus, all_samples = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger) if args.ledger else None, Path(args.full_transcripts_json) if args.full_transcripts_json else None)
+        build_cloze_samples(Path(args.csv), args.word_col, args.base_word_col, all_samples, corpus, args.list_key, Path(args.out_json))
 
 
 if __name__ == "__main__":

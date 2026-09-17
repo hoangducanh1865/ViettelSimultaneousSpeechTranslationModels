@@ -47,6 +47,7 @@ from typing import Optional
 
 from tqdm.auto import tqdm
 
+from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 20
@@ -153,11 +154,17 @@ def _classify_level_batch(client, model, batch, max_retries):
 
 def classify_levels(
     client, model, records: list[dict], *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[dict]:
     """Trả về BẢN SAO của records, mỗi record thêm target_word/max_level/historical_fact/
-    level_reason."""
+    level_reason.
+
+    knowledge_graph=None (mặc định) -> hành vi CŨ y hệt (an toàn ngược). Khi có, từ đã được 3
+    model debate xác thực (words_index) dùng TRỰC TIẾP fields.historical_fact/category_hint đã
+    debate -- KHÔNG gọi Gemini tự quyết lại (rẻ hơn VÀ ít hallucination hơn so với để 1 lệnh gọi
+    Gemini đơn lẻ tự quyết định mức 3); từ chưa có trong kg vẫn rơi về đường Gemini-tự-quyết cũ."""
     records = [dict(r) for r in records]
     for r in records:
         r["target_word"] = extract_target_word(r)
@@ -166,9 +173,14 @@ def classify_levels(
     print(f"CẢNH BÁO: {n_no_target}/{len(records)} sample KHÔNG trích được target_word "
           "thật từ transcript -- các sample này sẽ mặc định mức độ 1 (an toàn nhất).")
 
-    pending = [r for r in records if r["target_word"] is not None]
+    kg_words = words_index(knowledge_graph) if knowledge_graph else {}
+    n_from_kg = sum(1 for r in records if r["target_word"] in kg_words)
+    if kg_words:
+        print(f"{n_from_kg}/{len(records)} sample dùng trực tiếp dữ kiện đã debate xác thực từ knowledge graph.")
+
+    pending = [r for r in records if r["target_word"] is not None and r["target_word"] not in kg_words]
     print(f"Cần Gemini phân loại mức 1/2/3 cho {len(pending)} sample "
-          f"({len(records) - len(pending)} sample không có target_word sẽ mặc định mức 1).")
+          f"({len(records) - len(pending)} sample không cần gọi Gemini -- mặc định mức 1 hoặc lấy từ knowledge graph).")
 
     batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     level_results: dict = {}
@@ -179,6 +191,14 @@ def classify_levels(
                 level_results.update(future.result())
 
     for r in records:
+        if r["target_word"] in kg_words:
+            entry = kg_words[r["target_word"]]
+            fact = entry.get("fields", {}).get("historical_fact")
+            category_hint = entry.get("fields", {}).get("category_hint")
+            r["max_level"] = 3 if fact else (2 if category_hint else 1)
+            r["historical_fact"] = fact
+            r["level_reason"] = f"Từ knowledge graph (source={entry.get('source')})."
+            continue
         if r["target_word"] is None:
             r["max_level"] = 1
             r["historical_fact"] = None
@@ -234,7 +254,7 @@ choices) -- không giải thích thêm, không markdown fence.
 """
 
 
-def _gen_question_batch(client, model, batch, max_retries):
+def _gen_question_batch(client, model, batch, max_retries, system_prompt):
     # batch: list[(id_ghep, record, target_level)]
     payload = [
         {
@@ -257,7 +277,7 @@ def _gen_question_batch(client, model, batch, max_retries):
                 model=model,
                 contents=json.dumps(payload, ensure_ascii=False),
                 config=types.GenerateContentConfig(
-                    system_instruction=MULTIHOP_SYSTEM_PROMPT,
+                    system_instruction=system_prompt,
                     temperature=0.7,
                     max_output_tokens=8192,
                 ),
@@ -285,11 +305,19 @@ def _gen_question_batch(client, model, batch, max_retries):
 
 def generate_questions(
     client, model, leveled_records: list[dict], output_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_GEN_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> None:
     """Với mỗi sample có max_level=N, sinh ĐỦ N câu (level 1..N), ghi liền nhau theo thứ tự
-    sample gốc vào output_path (append, resumable qua id ghép "<id>__L<level>")."""
+    sample gốc vào output_path (append, resumable qua id ghép "<id>__L<level>").
+
+    knowledge_graph=None -> hành vi CŨ y hệt; khi có, nối thêm luật debate đã tinh chỉnh (cho cả
+    3 level) vào system prompt cho pha sinh hàng loạt."""
+    system_prompt = MULTIHOP_SYSTEM_PROMPT + "".join(
+        rule_addendum_text(knowledge_graph, f"level_{lvl}") for lvl in (1, 2, 3)
+    )
+
     done_ghep_ids = set()
     if output_path.exists():
         with open(output_path, encoding="utf-8") as f:
@@ -312,7 +340,7 @@ def generate_questions(
     batches = [expanded[i:i + batch_size] for i in range(0, len(expanded), batch_size)]
     batch_results: dict = {}
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_gen_question_batch, client, model, b, max_retries): b for b in batches}
+        futures = {executor.submit(_gen_question_batch, client, model, b, max_retries, system_prompt): b for b in batches}
         for future in tqdm(as_completed(futures), total=len(futures), desc="sinh câu hỏi multi-hop"):
             batch_results.update(future.result())
 
@@ -334,6 +362,7 @@ def generate_questions(
                     "audio_id": r.get("audio_id"),
                     "level": target_level,
                     "max_level": r["max_level"],
+                    "question_type": {1: "1-hop", 2: "2-hop", 3: "3-hop"}[target_level],
                     "target_word": r["target_word"],
                     "question": gen["question"],
                     "choices": gen["choices"],
@@ -411,6 +440,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--service-account-json", required=True)
     p1.add_argument("--input", required=True, help="han_viet_qa.jsonl (đã có field transcript).")
     p1.add_argument("--output", required=True, help="han_viet_difficulty_levels.jsonl")
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
     p1.add_argument("--model", default=DEFAULT_MODEL)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -420,6 +450,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--service-account-json", required=True)
     p2.add_argument("--input", required=True, help="han_viet_difficulty_levels.jsonl")
     p2.add_argument("--output", required=True, help="han_viet_multihop_qa.jsonl")
+    p2.add_argument("--knowledge-json", default=None)
     p2.add_argument("--model", default=DEFAULT_MODEL)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -435,8 +466,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         client = load_gemini_client(args.service_account_json)
         records = _load_jsonl(Path(args.input))
         print(f"Đã đọc {len(records)} sample từ {args.input}")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         leveled = classify_levels(
-            client, args.model, records,
+            client, args.model, records, knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -451,8 +483,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         client = load_gemini_client(args.service_account_json)
         leveled_records = _load_jsonl(Path(args.input))
         print(f"Đã đọc {len(leveled_records)} sample đã phân loại mức độ.")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, leveled_records, Path(args.output),
+            client, args.model, leveled_records, Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 

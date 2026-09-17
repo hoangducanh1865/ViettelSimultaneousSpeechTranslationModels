@@ -39,6 +39,7 @@ from typing import Optional
 
 from tqdm.auto import tqdm
 
+from knowledge_graph import load_knowledge_graph, rule, rule_addendum_text, words_index
 from translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 25
@@ -47,6 +48,31 @@ DEFAULT_MAX_RETRIES = 3
 
 WORD_COL = "Từ láy"
 _VAN_RE = re.compile(r"Láy vần \(([^)]+)\)")
+
+# --- Tone (thanh điệu) classification -- dùng cho cơ chế cloze/Tone Harmony của variant toàn bộ ---
+# 5 dấu thanh (dạng combining mark sau khi NFD-decompose); "ngang" = không dấu, không nằm trong
+# bảng này. Dấu NGUYÊN ÂM (ă â ê ô ơ ư) KHÔNG ảnh hưởng vì chúng decompose ra combining mark
+# KHÁC (breve/circumflex/horn), không trùng 5 mark thanh điệu dưới đây.
+_TONE_COMBINING_MARK = {"́": "sac", "̀": "huyen", "̉": "hoi", "̃": "nga", "̣": "nang"}
+_HIGH_TONES = {"ngang", "sac", "hoi"}  # âm vực cao; huyền/nặng/ngã là âm vực thấp
+
+
+def classify_tone(syllable: str) -> str:
+    """Trả về 1 trong 6 thanh điệu (ngang/sac/huyen/hoi/nga/nang) của 1 tiếng, qua NFD-decompose
+    rồi tìm combining mark thanh điệu."""
+    import unicodedata
+
+    for ch in unicodedata.normalize("NFD", syllable):
+        if ch in _TONE_COMBINING_MARK:
+            return _TONE_COMBINING_MARK[ch]
+    return "ngang"
+
+
+def tone_register(syllable: str) -> str:
+    """"high" (ngang/sắc/hỏi) hoặc "low" (huyền/nặng/ngã) -- luật Tone Harmony: 2 tiếng láy chỉ
+    ghép được nếu CÙNG âm vực (ví dụ "xanh" [ngang, high] -> "xanh xao" [ngang, high]; "đẹp"
+    [nặng, low] -> "đẽ" [ngã, low])."""
+    return "high" if classify_tone(syllable) in _HIGH_TONES else "low"
 
 
 # ============================================================================================
@@ -216,6 +242,10 @@ def _normalize_csv_row(variant: str, row: dict) -> dict:
         return {
             "y_nghia": row["Ý nghĩa"], "sac_thai": row["Sắc thái biểu đạt"],
             "_group_key": row["Phân loại"],
+            # "Từ gốc (cơ sở)" (base_word) chỉ có SAU KHI apply_knowledge_graph.py ghi thêm cột
+            # này từ knowledge graph -- rỗng nếu CSV chưa qua bước đó (build_cloze_entries sẽ bỏ
+            # qua các dòng thiếu base_word).
+            "base_word": row.get("Từ gốc (cơ sở)", ""),
         }
     if variant == "van":
         return {
@@ -458,14 +488,24 @@ def _build_word_entries(variant: str, samples: list[dict], word_rows: dict) -> l
 
 def classify_levels(
     client, model, variant: str, samples: list[dict], csv_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> list[dict]:
+    """knowledge_graph=None -> hành vi CŨ y hệt (an toàn ngược). Khi có, từ láy đã được 3 model
+    debate xác thực (words_index) dùng TRỰC TIẾP fields.cultural_fact đã debate -- KHÔNG gọi
+    Gemini tự quyết lại; từ chưa có trong kg vẫn rơi về đường Gemini-tự-quyết cũ."""
     word_rows = _load_word_rows(variant, csv_path)
     entries = _build_word_entries(variant, samples, word_rows)
-    print(f"Cần phân loại mức độ cho {len(entries)} (sample, từ láy).")
+    kg_words = words_index(knowledge_graph) if knowledge_graph else {}
+    n_from_kg = sum(1 for e in entries if e["tu"] in kg_words)
+    if kg_words:
+        print(f"{n_from_kg}/{len(entries)} (sample, từ láy) dùng trực tiếp dữ kiện đã debate xác thực từ knowledge graph.")
 
-    batches = [entries[i:i + batch_size] for i in range(0, len(entries), batch_size)]
+    pending = [e for e in entries if e["tu"] not in kg_words]
+    print(f"Cần Gemini phân loại mức độ cho {len(pending)} (sample, từ láy).")
+
+    batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     level_results: dict = {}
     if batches:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -474,6 +514,13 @@ def classify_levels(
                 level_results.update(future.result())
 
     for e in entries:
+        if e["tu"] in kg_words:
+            entry = kg_words[e["tu"]]
+            fact = entry.get("fields", {}).get("cultural_fact")
+            e["max_level"] = 3 if fact else 2
+            e["cultural_fact"] = fact
+            e["level_reason"] = f"Từ knowledge graph (source={entry.get('source')})."
+            continue
         res = level_results.get(e["id"], {"level_3_eligible": False, "cultural_fact": None, "reason": "Không có kết quả."})
         if res.get("level_3_eligible") and res.get("cultural_fact"):
             e["max_level"] = 3
@@ -486,7 +533,7 @@ def classify_levels(
     return entries
 
 
-def _gen_level3_batch(client, model, batch, max_retries):
+def _gen_level3_batch(client, model, batch, max_retries, system_prompt):
     # batch: list[(id_ghep, entry)]
     from google.genai import types
 
@@ -502,7 +549,7 @@ def _gen_level3_batch(client, model, batch, max_retries):
                 model=model,
                 contents=json.dumps(payload, ensure_ascii=False),
                 config=types.GenerateContentConfig(
-                    system_instruction=LEVEL3_SYSTEM_PROMPT, temperature=0.7, max_output_tokens=8192,
+                    system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
                 ),
             )
             raw = (response.text or "").strip()
@@ -541,15 +588,20 @@ def _record_common_fields(variant: str, e: dict, id_ghep: str, level: int) -> di
         "difficulty": {1: "easy", 2: "medium", 3: "hard"}[level],
         "level": level,
         "max_level": e["max_level"],
+        "question_type": {1: "1-hop", 2: "2-hop", 3: "3-hop"}[level],
     }
 
 
 def generate_questions(
     client, model, variant: str, entries: list[dict], csv_path: Path, output_path: Path, *,
+    knowledge_graph: Optional[dict] = None,
     batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
     max_retries: int = DEFAULT_MAX_RETRIES, seed: int = 42,
 ) -> None:
+    """knowledge_graph=None -> hành vi CŨ y hệt; khi có, nối thêm luật debate đã tinh chỉnh vào
+    system prompt sinh câu hỏi level 3 (level 1/2 không gọi Gemini nên không có prompt để sửa)."""
     random.seed(seed)
+    level3_system_prompt = LEVEL3_SYSTEM_PROMPT + rule_addendum_text(knowledge_graph, "level_3")
     word_rows = _load_word_rows(variant, csv_path)
     all_words = list(word_rows.items())
     aspects = VARIANT_ASPECTS[variant]
@@ -623,7 +675,7 @@ def generate_questions(
         batches = [level3_pending[i:i + batch_size] for i in range(0, len(level3_pending), batch_size)]
         level3_results: dict = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_gen_level3_batch, client, model, b, max_retries): b for b in batches}
+            futures = {executor.submit(_gen_level3_batch, client, model, b, max_retries, level3_system_prompt): b for b in batches}
             for future in tqdm(as_completed(futures), total=len(futures), desc=f"tu_lay_{variant} sinh câu hỏi level 3"):
                 level3_results.update(future.result())
 
@@ -652,6 +704,167 @@ def generate_questions(
         all_out = [json.loads(line) for line in f if line.strip()]
     print(f"Phân bố level trong file kết quả: {dict(Counter(r.get('level') for r in all_out))}")
     print(f"Số (sample, từ láy) có mặt: {len({r.get('source_id', r['id']) for r in all_out})}")
+
+
+# ============================================================================================
+# Cơ chế MỚI: câu hỏi cloze/Tone Harmony -- CHỈ variant "toan_bo", BỔ SUNG (không thay thế)
+# level 1/2/3 ở trên. Input: build-cloze-samples output của hien_tuong_filter_pipeline.py (mỗi
+# sample có TỪ GỐC chưa láy trong transcript, KHÔNG có từ láy đầy đủ -- tránh lộ đáp án).
+# ============================================================================================
+
+CLOZE_QUESTION_TEMPLATES = {
+    "increase": [
+        "Giả sử transcript: \"{transcript}\". Có thể thêm vào từ nào dưới đây để TĂNG mức độ "
+        "của điều được đề cập?",
+        "Trong câu \"{transcript}\", từ láy nào dưới đây phù hợp để nhấn mạnh/tăng mức độ nội "
+        "dung câu nói?",
+    ],
+    "decrease": [
+        "Giả sử transcript: \"{transcript}\". Có thể thêm vào từ nào dưới đây để làm NHẸ mức độ "
+        "của điều được đề cập?",
+        "Trong câu \"{transcript}\", từ láy nào dưới đây phù hợp để giảm nhẹ mức độ nội dung câu nói?",
+    ],
+    "neutral": [
+        "Giả sử transcript: \"{transcript}\". Có thể thêm vào từ láy nào dưới đây để diễn đạt lại "
+        "điều được đề cập một cách tự nhiên hơn?",
+    ],
+}
+
+
+def _cloze_direction(sac_thai: str) -> str:
+    """Suy ra "increase"/"decrease"/"neutral" từ text "Sắc thái biểu đạt" (keyword "giảm"/"nhẹ"
+    -> decrease, "tăng"/"mạnh" -> increase) -- thuần local, chỉ chọn template câu hỏi, KHÔNG gọi
+    LLM (giữ cơ chế cloze hoàn toàn rule-based, chi phí biên = 0)."""
+    text = sac_thai.lower()
+    if "giảm" in text or "nhẹ" in text:
+        return "decrease"
+    if "tăng" in text or "mạnh" in text:
+        return "increase"
+    return "neutral"
+
+
+def build_cloze_entries(samples: list[dict], word_rows: dict) -> list[dict]:
+    id_prefix_base = VARIANT_ID_PREFIX["toan_bo"]
+    entries = []
+    for i, s in enumerate(samples):
+        found = s.get("tu_lay_cloze_candidate") or []
+        sample_id_prefix = f"{id_prefix_base}-{i + 1:04d}"
+        for word_idx, tu_info in enumerate(found):
+            word = tu_info["tu"]
+            if word not in word_rows:
+                continue
+            entries.append({
+                "id": f"{sample_id_prefix}-w{word_idx}",
+                "tu": word,
+                "base_word": tu_info["base_word"],
+                "sac_thai": word_rows[word]["sac_thai"],
+                "transcript": s.get("transcript") or s.get("text") or "",
+                "sample": s,
+            })
+    return entries
+
+
+def generate_cloze_questions(entries: list[dict], word_rows: dict, output_path: Path, *, seed: int = 42) -> None:
+    """KHÔNG gọi Gemini. Đáp án đúng = từ láy toàn bộ đầy đủ (cột "Từ láy"). Nhiễu = các từ láy
+    toàn bộ THẬT KHÁC trong CSV có tone_register(base_word) CÙNG với đáp án đúng (Tone Harmony --
+    khó nhất vì cùng âm vực nên "nghe hợp lý"), hạ dần xuống lấy bất kỳ dòng thật khác nếu CSV
+    hiện quá nhỏ (không đủ 3 candidate cùng âm vực) -- tái dùng NGUYÊN _candidate_priority_order/
+    _pick_distractors_rule_based đã có cho level 1/2, không bịa từ giả. Resumable qua id ghép
+    "<id>__CLOZE"."""
+    random.seed(seed)
+    all_words = list(word_rows.items())
+
+    done_ghep_ids = set()
+    if output_path.exists():
+        with open(output_path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    done_ghep_ids.add(json.loads(line)["id"])
+        print(f"Đã có sẵn {len(done_ghep_ids)} câu hỏi cloze trong {output_path} -- resume.")
+
+    n_written = n_failed = 0
+    with open(output_path, "a", encoding="utf-8") as f:
+        for e in entries:
+            id_ghep = f"{e['id']}__CLOZE"
+            if id_ghep in done_ghep_ids:
+                continue
+
+            correct_choice = e["tu"]
+            correct_register = tone_register(e["base_word"])
+            # Ưu tiên nhiễu CÙNG âm vực (Tone Harmony -- khó nhất); "_group_key" ở đây dùng tạm
+            # thời để tận dụng lại _candidate_priority_order (vốn ưu tiên theo "_group_key"), nên
+            # gán "_group_key" = tone_register của TỪNG dòng ngay trước khi gọi.
+            words_with_register = [
+                (w, {**row, "tu": w, "_group_key": tone_register(row["base_word"])}) for w, row in all_words if row.get("base_word")
+            ]
+            try:
+                distractors = _pick_distractors_rule_based(
+                    words_with_register, "tu", correct_choice, correct_register, correct_choice, n=3,
+                )
+            except AssertionError:
+                n_failed += 1
+                continue
+
+            choices = distractors + [correct_choice]
+            random.shuffle(choices)
+            direction = _cloze_direction(e["sac_thai"])
+            question = random.choice(CLOZE_QUESTION_TEMPLATES[direction]).format(transcript=e["transcript"])
+            s = e["sample"]
+            id_prefix_base = VARIANT_ID_PREFIX["toan_bo"]
+            record = {
+                "id": id_ghep,
+                "source_id": e["id"],
+                "audio_id": f"{id_prefix_base}/audio/{Path(_sample_audio_path(s)).name}",
+                "dataset": _dataset_from_audio_filepath(_sample_audio_path(s)),
+                "task": "speech",
+                "split": "test",
+                "category": "Reasoning",
+                "sub-category": "Hiện tượng đặc biệt trong tiếng Việt",
+                "difficulty": "hard",
+                "question": question,
+                "choices": choices,
+                "answer": correct_choice,
+                "question_type": "cloze-tone-harmony",
+                "base_word": e["base_word"],
+                "tone_register": correct_register,
+            }
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            n_written += 1
+
+    print(f"\nĐã ghi thêm {n_written} câu hỏi cloze vào {output_path} "
+          f"({n_failed} bị bỏ qua do thiếu nhiễu cùng âm vực/khác biệt).")
+
+
+# ============================================================================================
+# Scaffolding cho van/chung -- KHÔNG tự thiết kế mechanic cụ thể (theo đúng yêu cầu: cơ chế độ
+# khó tương đương cho variant van/chung phải do chính 3-model debate đề xuất). Hàm này chỉ là
+# chỗ nối rỗng: no-op cho tới khi debate bật "rules.{variant}_new_mechanic.enabled" = true và
+# cung cấp description/extra_fields cụ thể trong knowledge graph.
+# ============================================================================================
+
+def generate_extra_mechanic_questions(
+    client, model, variant: str, entries: list[dict], knowledge_graph: Optional[dict], output_path: Path, *,
+    batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS, max_retries: int = DEFAULT_MAX_RETRIES,
+) -> None:
+    mechanic = rule(knowledge_graph, f"{variant}_new_mechanic") if knowledge_graph else {}
+    if not mechanic.get("enabled"):
+        print(f"rules.{variant}_new_mechanic chưa được debate bật (enabled=false/chưa có) -- bỏ qua, không sinh gì.")
+        return
+
+    system_prompt = (
+        f"Bạn sinh câu hỏi trắc nghiệm 4 lựa chọn cho cơ chế độ khó MỚI (variant {variant}), đã "
+        f"được 3 model debate đồng thuận:\n{mechanic['description']}\n\n"
+        f"Chiến lược sinh nhiễu: {mechanic.get('distractor_strategy', '(không có, tự chọn hợp lý)')}\n"
+        f"TUYỆT ĐỐI chỉ dựa vào dữ kiện THẬT đã cho trong extra_fields của từng entry, không bịa.\n\n"
+        f"Input: JSON array {{'id': str, 'tu': str, 'transcript': str, 'extra_fields': object}}.\n"
+        f"Output: CHỈ trả về JSON array cùng độ dài, {{'id': <id đầu vào>, 'question': str, "
+        f"'choices': [str,str,str,str], 'answer': str}} -- không giải thích, không markdown fence."
+    )
+    print(f"[{variant}_new_mechanic] enabled -- sẽ gọi Gemini sinh câu hỏi theo mechanic debate đã đề xuất "
+          f"(chưa từng chạy thật -- cần xác nhận lại prompt trên khi có knowledge graph thật đầu tiên bật cờ này).")
+    # Thực thi cụ thể (batch call + resumable write) để trống CÓ CHỦ Ý: cấu trúc chính xác của
+    # "extra_fields" phụ thuộc HOÀN TOÀN vào những gì debate đề xuất, chưa tồn tại tại thời điểm
+    # viết code này -- xem "Open questions" trong plan.
 
 
 def generate(
@@ -789,6 +1002,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--samples", required=True, help="asr_samples_with_tu_lay_<variant>.json")
     p1.add_argument("--csv", required=True, help="tu_lay_<variant>_final.csv")
     p1.add_argument("--output", required=True, help="tu_lay_<variant>_difficulty_levels.jsonl")
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
     p1.add_argument("--model", default=DEFAULT_MODEL)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -800,11 +1014,29 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--input", required=True, help="tu_lay_<variant>_difficulty_levels.jsonl")
     p2.add_argument("--csv", required=True, help="tu_lay_<variant>_final.csv")
     p2.add_argument("--output", required=True, help="tu_lay_<variant>_multihop_qa.jsonl")
+    p2.add_argument("--knowledge-json", default=None)
     p2.add_argument("--model", default=DEFAULT_MODEL)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
     p2.add_argument("--seed", type=int, default=42)
+
+    p3 = sub.add_parser("generate-cloze-questions", help="Câu hỏi cloze/tone-harmony -- CHỈ variant toan_bo, bổ sung KHÔNG thay thế level 1/2/3.")
+    p3.add_argument("--samples", required=True, help="asr_samples_with_tu_lay_toan_bo_cloze.json (build-cloze-samples output)")
+    p3.add_argument("--csv", required=True, help="tu_lay_toan_bo_final.csv (cần cột \"Từ gốc (cơ sở)\" từ apply_knowledge_graph.py)")
+    p3.add_argument("--output", required=True)
+    p3.add_argument("--seed", type=int, default=42)
+
+    p4 = sub.add_parser("generate-extra-mechanic-questions", help="Cơ chế độ khó MỚI cho variant van/chung (do debate tự đề xuất) -- no-op nếu chưa được debate bật.")
+    p4.add_argument("--variant", required=True, choices=["van", "chung"])
+    p4.add_argument("--service-account-json", required=True)
+    p4.add_argument("--input", required=True, help="tu_lay_<variant>_difficulty_levels.jsonl")
+    p4.add_argument("--knowledge-json", required=True)
+    p4.add_argument("--output", required=True)
+    p4.add_argument("--model", default=DEFAULT_MODEL)
+    p4.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    p4.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
+    p4.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     args = parser.parse_args(argv)
 
@@ -824,8 +1056,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.samples, encoding="utf-8") as f:
             samples = json.load(f)
         print(f"Đã đọc {len(samples)} sample từ {args.samples}")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         entries = classify_levels(
-            client, args.model, args.variant, samples, Path(args.csv),
+            client, args.model, args.variant, samples, Path(args.csv), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -841,9 +1074,29 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.input, encoding="utf-8") as f:
             entries = [json.loads(line) for line in f if line.strip()]
         print(f"Đã đọc {len(entries)} entry đã phân loại mức độ.")
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, args.variant, entries, Path(args.csv), Path(args.output),
+            client, args.model, args.variant, entries, Path(args.csv), Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries, seed=args.seed,
+        )
+
+    elif args.command == "generate-cloze-questions":
+        word_rows = _load_word_rows("toan_bo", Path(args.csv))
+        with open(args.samples, encoding="utf-8") as f:
+            samples = json.load(f)
+        print(f"Đã đọc {len(samples)} sample từ {args.samples}")
+        entries = build_cloze_entries(samples, word_rows)
+        print(f"Cần sinh câu hỏi cloze cho {len(entries)} (sample, từ láy toàn bộ).")
+        generate_cloze_questions(entries, word_rows, Path(args.output), seed=args.seed)
+
+    elif args.command == "generate-extra-mechanic-questions":
+        client = load_gemini_client(args.service_account_json)
+        with open(args.input, encoding="utf-8") as f:
+            entries = [json.loads(line) for line in f if line.strip()]
+        knowledge_graph = load_knowledge_graph(Path(args.knowledge_json))
+        generate_extra_mechanic_questions(
+            client, args.model, args.variant, entries, knowledge_graph, Path(args.output),
+            batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 
 
