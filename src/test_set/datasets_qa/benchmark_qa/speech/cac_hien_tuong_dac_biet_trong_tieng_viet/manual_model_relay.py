@@ -77,12 +77,19 @@ class RelayState:
 
 def extract_knowledge_json(response_text: str) -> Optional[dict]:
     """Lấy khối ```json ... ``` CUỐI CÙNG trong response (nếu model lỡ in ra nhiều khối, khối
-    cuối luôn là bản họ muốn giữ lại)."""
+    cuối luôn là bản họ muốn giữ lại). Nếu KHÔNG có khối fence nào (rất thường gặp: nút "Copy"
+    trên web chat của nhiều model chỉ copy phần NỘI DUNG bên trong code block, không copy luôn
+    dấu ```json/``` bao ngoài -- người dùng paste vào response_file sẽ chỉ còn JSON trần), thử
+    parse TOÀN BỘ response_text như 1 JSON object độc lập trước khi bỏ cuộc."""
     matches = _JSON_FENCE_RE.findall(response_text)
-    if not matches:
-        return None
+    if matches:
+        try:
+            return json.loads(matches[-1].strip())
+        except json.JSONDecodeError:
+            pass  # rơi xuống thử parse toàn bộ text, phòng trường hợp fence match hỏng 1 phần
+
     try:
-        return json.loads(matches[-1].strip())
+        return json.loads(response_text.strip())
     except json.JSONDecodeError:
         return None
 
