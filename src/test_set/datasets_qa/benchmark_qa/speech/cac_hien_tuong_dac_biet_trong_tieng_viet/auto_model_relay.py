@@ -91,21 +91,31 @@ class RelayState:
     stopped_reason: Optional[str] = None  # "consensus" | "max_rounds" | None (still running)
 
 
-def extract_knowledge_json(response_text: str) -> Optional[dict]:
-    """Lấy khối ```json ... ``` CUỐI CÙNG trong response (nếu model lỡ in ra nhiều khối, khối
-    cuối luôn là bản họ muốn giữ lại). Nếu KHÔNG có khối fence nào, thử parse TOÀN BỘ
-    response_text như 1 JSON object độc lập trước khi bỏ cuộc."""
-    matches = _JSON_FENCE_RE.findall(response_text)
-    if matches:
-        try:
-            return json.loads(matches[-1].strip())
-        except json.JSONDecodeError:
-            pass
-
+def _loads_lenient(text: str) -> Optional[dict]:
+    """json.loads() nghiêm ngặt fail ngay khi có bất kỳ ký tự THỪA nào sau JSON hợp lệ (ví dụ
+    model quên bọc fence nên "CONSENSUS: FINAL" bị dính liền sau dấu "}" cuối -> lỗi "Extra
+    data"). json.JSONDecoder().raw_decode() chỉ parse ĐÚNG value JSON đầu tiên và bỏ qua phần
+    thừa phía sau -- khoan dung hơn nhiều với các lỗi định dạng nhỏ của model mà vẫn an toàn (chỉ
+    trả về khi phần ĐẦU thật sự là JSON hợp lệ, không đoán mò nội dung)."""
     try:
-        return json.loads(response_text.strip())
+        obj, _ = json.JSONDecoder().raw_decode(text)
+        return obj
     except json.JSONDecodeError:
         return None
+
+
+def extract_knowledge_json(response_text: str) -> Optional[dict]:
+    """Lấy khối ```json ... ``` CUỐI CÙNG trong response (nếu model lỡ in ra nhiều khối, khối
+    cuối luôn là bản họ muốn giữ lại). Nếu KHÔNG có khối fence nào (model quên bọc fence), thử
+    parse TOÀN BỘ response_text -- cả 2 nhánh đều dùng raw_decode (khoan dung với text thừa phía
+    sau JSON, ví dụ dòng "CONSENSUS: FINAL" dính liền không có fence ngăn cách)."""
+    matches = _JSON_FENCE_RE.findall(response_text)
+    if matches:
+        parsed = _loads_lenient(matches[-1].strip())
+        if parsed is not None:
+            return parsed
+
+    return _loads_lenient(response_text.strip())
 
 
 def extract_consensus_vote(response_text: str) -> Optional[str]:
