@@ -170,7 +170,12 @@ def load_gemini_client(service_account_path: str, *, location: str = "global"):
 def load_openai_client(api_key_path: Path, base_url: str):
     from openai import OpenAI
 
-    api_key = Path(api_key_path).read_text(encoding="utf-8").strip()
+    raw = Path(api_key_path).read_text(encoding="utf-8").strip()
+    # Chấp nhận cả 2 dạng: key trần trên 1 dòng, HOẶC dòng kiểu env-var
+    # OPENAI_API_KEY="..."/OPENAI_API_KEY=... -- lấy đúng phần giá trị, bỏ dấu nháy nếu có.
+    if "=" in raw:
+        raw = raw.split("=", 1)[1].strip()
+    api_key = raw.strip('"').strip("'")
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
