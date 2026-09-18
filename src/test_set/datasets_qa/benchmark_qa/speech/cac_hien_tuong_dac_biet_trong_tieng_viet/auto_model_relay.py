@@ -61,7 +61,7 @@ from knowledge_graph import SCHEMA_VERSION
 DEFAULT_MODEL_ORDER = ["gemini", "openai"]
 DEFAULT_MAX_ROUNDS = 5
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_GEMINI_MODEL = "gemini-3.1-pro"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_OPENAI_MODEL = "cx/gpt-5.6-luna"
 DEFAULT_OPENAI_BASE_URL = "https://r3wrrfi.abc-tunnel.us/v1"
 
