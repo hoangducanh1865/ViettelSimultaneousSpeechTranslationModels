@@ -116,7 +116,10 @@ CONSENSUS_INSTRUCTIONS = (
     '  "CONSENSUS: FINAL" -- nếu bạn thấy knowledge graph đã đủ tốt, không cần sửa thêm.\n'
     '  "CONSENSUS: CONTINUE" -- nếu bạn vừa sửa/thêm gì đó và muốn model tiếp theo xem lại.\n'
     "Luôn trả về TOÀN BỘ knowledge graph (không phải diff) trong 1 khối ```json ... ``` duy nhất, "
-    "đúng schema đã cho."
+    "đúng schema đã cho.\n"
+    "QUAN TRỌNG -- JSON phải hợp lệ 100%: khi cần trích dẫn/nhấn mạnh 1 từ/cụm từ bên trong 1 "
+    "chuỗi text (fields.description, fields.notes, v.v.), dùng dấu nháy ĐƠN ' ' (ví dụ: từ 'cop'), "
+    "TUYỆT ĐỐI không dùng dấu nháy kép \" \" bên trong 1 chuỗi JSON vì sẽ làm gãy cú pháp JSON."
 )
 
 
