@@ -247,6 +247,7 @@ def run_turn(
     turn_index = len(state.turns) + 1
 
     last_error = None
+    last_response = None
     for attempt in range(max_retries):
         try:
             response = call_model(
@@ -254,8 +255,15 @@ def run_turn(
                 openai_client=openai_client, openai_model=openai_model,
                 max_output_tokens=max_output_tokens,
             )
+            last_response = response
             parsed = extract_knowledge_json(response)
             if parsed is None:
+                print_fn(
+                    f"[DEBUG] lượt {model} (round {round_index}, thử {attempt + 1}/{max_retries}) "
+                    f"không parse được JSON -- response dài {len(response)} ký tự.\n"
+                    f"    --- 300 ký tự ĐẦU ---\n{response[:300]!r}\n"
+                    f"    --- 300 ký tự CUỐI ---\n{response[-300:]!r}"
+                )
                 raise ValueError("Không parse được khối JSON hợp lệ trong response")
             vote = extract_consensus_vote(response)
             turn = Turn(round_index, turn_index, model, prompt, response, parsed, vote)
@@ -270,7 +278,7 @@ def run_turn(
                 time.sleep(2 ** attempt)
 
     print_fn(f"[LỖI] lượt {model} (round {round_index}) thất bại sau {max_retries} lần thử: {last_error!r} -- bỏ qua lượt này.")
-    turn = Turn(round_index, turn_index, model, prompt, "", None, None)
+    turn = Turn(round_index, turn_index, model, prompt, last_response or "", None, None)
     state.turns.append(turn)
     if log_dir is not None:
         _write_turn_log(log_dir, turn)
