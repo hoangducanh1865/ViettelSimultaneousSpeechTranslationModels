@@ -270,10 +270,15 @@ def load_gemini_client(service_account_path: str, *, location: str = "global"):
     return genai.Client(vertexai=True, project=project_id, location=location, credentials=credentials)
 
 
-def _make_openai_client(api_key: str, base_url: str):
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 300
+
+
+def _make_openai_client(api_key: str, base_url: str, *, timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS):
     from openai import OpenAI
 
-    return OpenAI(api_key=api_key, base_url=base_url)
+    # KHÔNG đặt timeout -> 1 request treo (proxy local/tunnel không phản hồi) sẽ chờ VÔ HẠN,
+    # không bao giờ vào nhánh except để retry/bỏ qua lượt -- cả relay đứng im, không log gì.
+    return OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
 
 
 def load_openai_client(api_key_path: Path, base_url: str):
