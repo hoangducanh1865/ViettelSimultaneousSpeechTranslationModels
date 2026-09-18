@@ -114,13 +114,23 @@ def extract_consensus_vote(response_text: str) -> Optional[str]:
 
 
 def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: RelayState, model: str) -> str:
-    """Turn 1 (state.turns rỗng): instructions + schema + evidence lấy nguyên từ seed --
-    evidence là "candidate_units" (nhóm theo sample, giữ ngữ cảnh multi-term) nếu seed có, else
-    "candidate_words" (phẳng theo từ, dùng cho 4 task cũ). Turn >1: tóm tắt NGẮN turn ngay trước +
-    TOÀN BỘ knowledge JSON hiện tại (không phải diff)."""
+    """Chưa có knowledge nào parse thành công (state.latest_knowledge is None -- KHÔNG phải chỉ
+    kiểm tra "turn đầu tiên", vì 1 turn có thể lỗi/không parse được, và nếu lượt SAU đó vẫn dựa
+    theo "đã có turn trước" thì sẽ mất hẳn evidence gốc, model phải bịa từ đầu): instructions +
+    schema + evidence lấy nguyên từ seed -- evidence là "candidate_units" (nhóm theo sample, giữ
+    ngữ cảnh multi-term) nếu seed có, else "candidate_words" (phẳng theo từ, dùng cho 4 task cũ).
+    Đã có knowledge (bất kể turn trước thành công hay không): tóm tắt NGẮN turn ngay trước + TOÀN
+    BỘ knowledge JSON hiện tại (không phải diff)."""
     header = f"[Relay tri thức tự động -- task={task}" + (f", variant={variant}" if variant else "") + f"] Lượt cho model: {model.upper()}\n"
 
-    if not state.turns:
+    prev = state.turns[-1] if state.turns else None
+    prev_note = (
+        f"Model trước ({prev.model}) vừa sửa knowledge graph và vote "
+        f"CONSENSUS: {prev.consensus_vote or 'CONTINUE (không rõ, thiếu marker/lỗi gọi API)'}.\n\n"
+        if prev is not None else ""
+    )
+
+    if state.latest_knowledge is None:
         if "candidate_units" in seed:
             evidence_block = (
                 f"DANH SÁCH SAMPLE (mỗi sample có transcript + TOÀN BỘ thuật ngữ xuất hiện CÙNG "
@@ -135,15 +145,14 @@ def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: Rela
                 f"{json.dumps(seed.get('unmatched_transcript_sample', []), ensure_ascii=False, indent=2)}"
             )
         body = (
+            f"{prev_note}"
             f"{seed['instructions']}\n\n"
             f"SCHEMA đích (trả về ĐÚNG dạng này):\n{seed['schema_spec']}\n\n"
             f"{evidence_block}"
         )
     else:
-        prev = state.turns[-1]
         body = (
-            f"Model trước ({prev.model}) vừa sửa knowledge graph và vote "
-            f"CONSENSUS: {prev.consensus_vote or 'CONTINUE (không rõ, thiếu marker/lỗi gọi API)'}.\n\n"
+            f"{prev_note}"
             f"{seed['instructions']}\n\n"
             f"SCHEMA đích:\n{seed['schema_spec']}\n\n"
             f"KNOWLEDGE GRAPH HIỆN TẠI (hãy rà soát/sửa/thêm/bớt, rồi trả lại TOÀN BỘ, không phải diff):\n"
