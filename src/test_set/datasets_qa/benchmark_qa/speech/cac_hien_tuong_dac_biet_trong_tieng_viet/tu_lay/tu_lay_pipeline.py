@@ -423,6 +423,10 @@ hỏi câu ca dao/tục ngữ/thành ngữ/tác phẩm nào có sử dụng từ
 cultural_fact (không đổi nội dung), và 3 phương án nhiễu là các câu ca dao/tục ngữ/thành ngữ/tác
 phẩm THẬT KHÁC (không bịa, không vô lý/lạc đề dễ loại trừ), khác nhau, khác đáp án đúng.
 
+Hệ thống trả lời câu hỏi CHỈ nghe được audio, KHÔNG có transcript. "transcript" trong input chỉ
+là tư liệu để BẠN suy luận -- nội dung "question" PHẢI luôn nói "đoạn audio"/"đoạn ghi âm"/"câu
+vừa nghe" (KHÔNG BAO GIỜ được dùng chữ "transcript" trong "question").
+
 Input: JSON array các object {"id": str, "tu": str, "transcript": str, "cultural_fact": str}.
 Output: CHỈ trả về JSON array cùng độ dài, mỗi phần tử {"id": <id đầu vào>, "question": str,
 "choices": [str, str, str, str], "answer": str} (answer PHẢI là 1 trong 4 choices) -- không giải

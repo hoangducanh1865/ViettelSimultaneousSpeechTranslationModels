@@ -249,6 +249,9 @@ QUY TẮC BẮT BUỘC:
   hiện 3 LẦN trong input (1 lần với target_level=1, 1 lần target_level=2, 1 lần target_level=3)
   -- mỗi lần sinh ĐÚNG 1 câu hỏi CHO ĐÚNG target_level đó (không phải max_level).
 - Câu hỏi KHÔNG được nhắc thẳng tên từ Hán-Việt mục tiêu (người nghe phải tự nhận ra qua audio).
+- Hệ thống trả lời câu hỏi CHỈ nghe được audio, KHÔNG có transcript. "transcript" trong input
+  chỉ là tư liệu để BẠN suy luận -- nội dung "question" PHẢI luôn nói "đoạn audio"/"đoạn ghi âm"/
+  "câu vừa nghe" (KHÔNG BAO GIỜ được dùng chữ "transcript" trong "question").
 - 3 phương án nhiễu phải CÙNG DẠNG với đáp án đúng (level 1: nhiễu là nghĩa khác; level 2: nhiễu
   là phạm trù khác; level 3: nhiễu là sự kiện lịch sử THẬT khác, không bịa sự kiện giả), khác
   nhau, và khác đáp án đúng.
