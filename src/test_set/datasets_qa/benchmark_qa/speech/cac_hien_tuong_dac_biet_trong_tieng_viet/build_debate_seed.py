@@ -119,7 +119,10 @@ CONSENSUS_INSTRUCTIONS = (
     "đúng schema đã cho.\n"
     "QUAN TRỌNG -- JSON phải hợp lệ 100%: khi cần trích dẫn/nhấn mạnh 1 từ/cụm từ bên trong 1 "
     "chuỗi text (fields.description, fields.notes, v.v.), dùng dấu nháy ĐƠN ' ' (ví dụ: từ 'cop'), "
-    "TUYỆT ĐỐI không dùng dấu nháy kép \" \" bên trong 1 chuỗi JSON vì sẽ làm gãy cú pháp JSON."
+    "TUYỆT ĐỐI không dùng dấu nháy kép \" \" bên trong 1 chuỗi JSON vì sẽ làm gãy cú pháp JSON. Dấu "
+    "nháy đơn ' KHÔNG cần và KHÔNG được thêm dấu \\ phía trước (viết đúng là 'cop', SAI là \\'cop\\' "
+    "-- ký tự \\' KHÔNG PHẢI escape hợp lệ trong JSON, chỉ \\\" mới hợp lệ, và cũng chỉ dùng khi "
+    "thật sự bắt buộc)."
 )
 
 

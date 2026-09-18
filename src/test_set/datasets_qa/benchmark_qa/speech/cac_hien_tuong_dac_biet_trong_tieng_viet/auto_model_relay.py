@@ -104,18 +104,31 @@ def _loads_lenient(text: str) -> Optional[dict]:
         return None
 
 
+def _repair_invalid_single_quote_escape(text: str) -> str:
+    """`\\'` (backslash + nháy đơn) KHÔNG PHẢI escape hợp lệ trong JSON (chỉ \\" mới hợp lệ) --
+    model hay tự ý thêm nó khi trích dẫn 1 từ (thói quen từ Python/JS) dù đã được dặn không cần.
+    Chỉ thay ĐÚNG 2 ký tự "\\'" thành "'" (không đụng vào bất kỳ escape hợp lệ nào khác, kể cả
+    \\\\' -- backslash thật rồi mới đến nháy đơn -- vì chuỗi cần thay là "\\" + "'" liền nhau,
+    không match được bên trong "\\\\" + "'")."""
+    return text.replace("\\'", "'")
+
+
 def extract_knowledge_json(response_text: str) -> Optional[dict]:
     """Lấy khối ```json ... ``` CUỐI CÙNG trong response (nếu model lỡ in ra nhiều khối, khối
     cuối luôn là bản họ muốn giữ lại). Nếu KHÔNG có khối fence nào (model quên bọc fence), thử
     parse TOÀN BỘ response_text -- cả 2 nhánh đều dùng raw_decode (khoan dung với text thừa phía
-    sau JSON, ví dụ dòng "CONSENSUS: FINAL" dính liền không có fence ngăn cách)."""
+    sau JSON) rồi mới thử lại sau khi sửa escape "\\'" sai nếu lần đầu vẫn fail."""
     matches = _JSON_FENCE_RE.findall(response_text)
-    if matches:
-        parsed = _loads_lenient(matches[-1].strip())
+    candidates = [matches[-1].strip()] if matches else []
+    candidates.append(response_text.strip())
+
+    for candidate in candidates:
+        parsed = _loads_lenient(candidate)
+        if parsed is None:
+            parsed = _loads_lenient(_repair_invalid_single_quote_escape(candidate))
         if parsed is not None:
             return parsed
-
-    return _loads_lenient(response_text.strip())
+    return None
 
 
 def extract_consensus_vote(response_text: str) -> Optional[str]:
