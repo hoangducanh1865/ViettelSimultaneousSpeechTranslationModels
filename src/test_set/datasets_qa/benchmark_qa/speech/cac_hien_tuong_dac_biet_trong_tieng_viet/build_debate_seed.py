@@ -82,6 +82,32 @@ INSTRUCTIONS_BY_TASK = {
         "'Nam Bộ' -- CHỈ điền nếu chắc chắn, else null/rejected) và fields.confidence "
         "('high'/'medium'/'low')."
     ),
+    "code_switching": (
+        "Bạn và 1 AI khác (luân phiên) đang RÀ SOÁT metadata cho các thuật ngữ code-switching (từ "
+        "nước ngoài chêm vào câu tiếng Việt) xuất hiện trong các sample audio dưới đây. Với MỖI "
+        "sample (có thể có NHIỀU thuật ngữ cùng lúc, liệt kê trong \"cs_terms\"), hãy:\n"
+        "1. (Đa từ) Nếu sample có >=2 thuật ngữ: xác định chúng có liên hệ với nhau không (cùng "
+        "lĩnh vực/chủ đề?) -- quyết định nên hỏi RIÊNG từng từ hay hỏi QUAN HỆ giữa chúng (hoặc cả "
+        "hai), ghi vào top-level \"sample_relations\": [{\"sample_id\", \"terms\", "
+        "\"question_strategy\": \"per_term\"|\"relational\"|\"both\", \"relation_fact\"}].\n"
+        "2. (Đếm & từ loại) Với MỖI thuật ngữ (đưa vào \"words\", key theo đúng chữ xuất hiện "
+        "trong transcript): thuật ngữ đóng vai trò từ loại gì trong câu (fields.pos_role_typical: "
+        "\"noun\"|\"verb\"|\"adjective\"|\"other\")? Nếu là ĐỘNG TỪ/TÍNH TỪ: mô tả nó làm thay đổi "
+        "ý định/sắc thái câu như thế nào (fields.sentiment_impact_note, else null).\n"
+        "3. (Tri thức nền) fields.domain (thuật ngữ thuộc lĩnh vực/hệ thống nào -- thực phẩm, bệnh "
+        "lý, công nghệ, thể thao...) và fields.knowledge_fact (1 dữ kiện THẬT ngắn gọn để hỏi được "
+        "ứng dụng/cấu tạo, CHỈ điền nếu chắc chắn, else null).\n"
+        "4. (Việt hóa) fields.vi_localized_term: nếu thuật ngữ này được dịch/Việt hóa CHUẨN XÁC "
+        "theo đúng chuyên ngành thì là gì (null nếu không có bản dịch chuẩn/không nên dịch).\n"
+        "5. (Rủi ro ASR) fields.asr_risk_level (\"low\"|\"medium\"|\"high\") và "
+        "fields.asr_risk_reason: nếu hệ thống nhận diện giọng nói nghe NHẦM từ này (thành từ phát "
+        "âm gần giống), hậu quả/sai lệch ngữ nghĩa nghiêm trọng đến mức nào và TẠI SAO -- áp dụng "
+        "cho MỌI loại thuật ngữ (tên riêng/thuật ngữ chuyên ngành/từ thông dụng), không chỉ domain "
+        "y khoa.\n"
+        "Đồng thời tinh chỉnh \"rules\" (multi_term_policy/count_classify/semantic_impact/"
+        "knowledge_grounding/localization/asr_risk), mỗi key có \"description\" mô tả luật áp "
+        "dụng chung cho pha sinh câu hỏi hàng loạt sau này."
+    ),
 }
 
 CONSENSUS_INSTRUCTIONS = (
@@ -109,18 +135,57 @@ def _load_web_candidates(path: Path) -> list[dict]:
     return [{"word": item["word"], "source": "web_research", "notes": item.get("note", "")} for item in items]
 
 
+def _load_samples_jsonl(path: Path) -> list[dict]:
+    """Đọc code_switching_qa.jsonl (hoặc bất kỳ file JSONL nào có "id"/"text" hoặc "transcript" +
+    "cs_terms") thành candidate_units -- mỗi unit = 1 sample kèm TOÀN BỘ thuật ngữ xuất hiện CÙNG
+    câu đó (giữ ngữ cảnh multi-term, khác hẳn candidate_words phẳng theo từ). Chỉ giữ sample có
+    ít nhất 1 cs_terms -- sample rỗng không có gì để debate."""
+    units = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            cs_terms = r.get("cs_terms") or []
+            if not cs_terms:
+                continue
+            units.append({
+                "sample_id": r.get("id"),
+                "transcript": r.get("text") or r.get("transcript") or r.get("segment_text") or "",
+                "cs_terms": cs_terms,
+            })
+    return units
+
+
 def build_seed(
     task: str, *, variant: Optional[str] = None,
     candidate_csv: Optional[Path] = None, word_col: Optional[str] = None,
     web_candidates_json: Optional[Path] = None,
     coverage_report: Optional[dict] = None,
     unmatched_sample_transcripts: Optional[list[str]] = None,
+    samples_jsonl: Optional[Path] = None,
     extra_instructions: str = "", max_unmatched_sample: int = 300,
 ) -> dict:
     """Hợp nhất 3 nguồn candidate (CSV hiện có + web-research + corpus-scan qua coverage_report)
-    thành 1 danh sách duy nhất, đính kèm bằng chứng thật (hit count/example transcript), rồi gói
-    thành seed JSON cho manual_model_relay.py. Không tự quyết định từ nào đúng/sai -- đó là việc
-    của 3 model trong relay, seed chỉ cung cấp evidence."""
+    thành 1 danh sách duy nhất theo TỪ, đính kèm bằng chứng thật (hit count/example transcript),
+    rồi gói thành seed JSON cho auto_model_relay.py. KHÔNG tự quyết định từ nào đúng/sai -- đó là
+    việc của model trong relay, seed chỉ cung cấp evidence.
+
+    NHÁNH THAY THẾ (samples_jsonl khác None, dùng cho Code-switching): thay vì candidate_words
+    phẳng, seed mang "candidate_units" -- mỗi unit là 1 SAMPLE với transcript + toàn bộ cs_terms
+    của chính sample đó, để relay giữ được ngữ cảnh multi-term. 2 nhánh KHÔNG trộn lẫn trong cùng
+    1 lần gọi (samples_jsonl bỏ qua toàn bộ candidate_csv/web_candidates_json/coverage_report)."""
+    if samples_jsonl is not None:
+        instructions = INSTRUCTIONS_BY_TASK[task]
+        if extra_instructions:
+            instructions += "\n\n" + extra_instructions
+        return {
+            "task": task, "variant": variant,
+            "instructions": instructions + CONSENSUS_INSTRUCTIONS,
+            "schema_spec": SCHEMA_TEXT,
+            "candidate_units": _load_samples_jsonl(samples_jsonl),
+        }
+
     candidates: dict[str, dict] = {}
 
     if candidate_csv is not None:
@@ -155,13 +220,14 @@ def build_seed(
 
 def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--task", required=True, choices=["han_viet", "tu_muon", "tu_lay", "phuong_ngu"])
+    parser.add_argument("--task", required=True, help="Tên task tự do -- phải có entry tương ứng trong INSTRUCTIONS_BY_TASK.")
     parser.add_argument("--variant", default=None, choices=["toan_bo", "van", "chung"])
     parser.add_argument("--candidate-csv", default=None)
     parser.add_argument("--word-col", default=None)
     parser.add_argument("--web-candidates-json", default=None, help='JSON list [{"word": str, "note": str}, ...].')
     parser.add_argument("--coverage-report", default=None, help="Output của hien_tuong_filter_pipeline.py word-coverage-report.")
     parser.add_argument("--unmatched-transcripts-sample", default=None, help="JSON list[str] transcript chưa khớp từ nào.")
+    parser.add_argument("--samples-jsonl", default=None, help="NHÁNH THAY THẾ (vd Code-switching): JSONL có id/text/cs_terms -- sinh candidate_units theo SAMPLE thay vì candidate_words theo TỪ, bỏ qua mọi tham số CSV/web/coverage ở trên.")
     parser.add_argument("--extra-instructions", default="")
     parser.add_argument("--max-unmatched-sample", type=int, default=300)
     parser.add_argument("--out-json", required=True)
@@ -182,12 +248,17 @@ def main(argv: Optional[list[str]] = None) -> None:
         candidate_csv=Path(args.candidate_csv) if args.candidate_csv else None, word_col=args.word_col,
         web_candidates_json=Path(args.web_candidates_json) if args.web_candidates_json else None,
         coverage_report=coverage_report, unmatched_sample_transcripts=unmatched,
+        samples_jsonl=Path(args.samples_jsonl) if args.samples_jsonl else None,
         extra_instructions=args.extra_instructions, max_unmatched_sample=args.max_unmatched_sample,
     )
     with open(args.out_json, "w", encoding="utf-8") as f:
         json.dump(seed, f, ensure_ascii=False, indent=2)
-    print(f"Đã lưu {args.out_json} ({len(seed['candidate_words'])} candidate word, "
-          f"{len(seed['unmatched_transcript_sample'])} transcript chưa khớp mẫu).")
+
+    if "candidate_units" in seed:
+        print(f"Đã lưu {args.out_json} ({len(seed['candidate_units'])} sample có cs_terms).")
+    else:
+        print(f"Đã lưu {args.out_json} ({len(seed['candidate_words'])} candidate word, "
+              f"{len(seed['unmatched_transcript_sample'])} transcript chưa khớp mẫu).")
 
 
 if __name__ == "__main__":
