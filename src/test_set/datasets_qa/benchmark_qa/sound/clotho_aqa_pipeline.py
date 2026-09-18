@@ -49,7 +49,7 @@ from tqdm.auto import tqdm
 # runs `!python .../clotho_aqa_pipeline.py` directly.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from translate_dataset import DEFAULT_MODEL, load_gemini_client
+from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_MAX_WORKERS = 4

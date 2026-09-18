@@ -62,7 +62,7 @@ sys.path.insert(0, str(_THIS_DIR.parents[3]))  # datasets_qa/, cho translate_dat
 import auto_model_relay  # noqa: E402 -- dùng chung call_model()/resolve_clients() cho auto-detect Colab/local
 import env_paths  # noqa: E402
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index  # noqa: E402
-from translate_dataset import DEFAULT_MODEL  # noqa: E402
+from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL  # noqa: E402
 
 DEFAULT_BATCH_SIZE = 15
 DEFAULT_GEN_BATCH_SIZE = 15

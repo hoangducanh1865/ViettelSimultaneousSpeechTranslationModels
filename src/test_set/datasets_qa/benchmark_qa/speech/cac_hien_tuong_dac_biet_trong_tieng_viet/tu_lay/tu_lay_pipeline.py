@@ -49,7 +49,7 @@ sys.path.insert(0, str(_THIS_DIR.parent))
 sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
 from knowledge_graph import load_knowledge_graph, rule, rule_addendum_text, words_index
-from translate_dataset import DEFAULT_MODEL, load_gemini_client
+from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
 
 DEFAULT_BATCH_SIZE = 25
 DEFAULT_MAX_WORKERS = 4

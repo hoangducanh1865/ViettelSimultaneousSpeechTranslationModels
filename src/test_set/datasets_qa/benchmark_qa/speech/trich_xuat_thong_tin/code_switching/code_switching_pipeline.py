@@ -56,7 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "cac_hien_tuong_dac_biet_trong_tieng_viet"))
 
 import env_paths  # noqa: E402
-from translate_dataset import DEFAULT_MODEL, load_gemini_client  # noqa: E402
+from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client  # noqa: E402
 
 TASK_NAME = "code_switch_question_answering"
 DEFAULT_BATCH_SIZE = 15
