@@ -188,26 +188,34 @@ def load_openai_client(api_key_path: Path, base_url: str):
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
+DEFAULT_MAX_OUTPUT_TOKENS = 32768
+
+
 def call_model(
     model_name: str, prompt: str, *,
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> str:
     """model_name == "gemini" -> gọi Gemini API; NGƯỢC LẠI (mọi tên khác, ví dụ "openai") -> gọi
     model OpenAI-compatible qua base_url riêng. Đây là điểm THAY THẾ DUY NHẤT so với
-    manual_model_relay.py: lấy response NGAY LẬP TỨC qua API, không cần người dán tay."""
+    manual_model_relay.py: lấy response NGAY LẬP TỨC qua API, không cần người dán tay.
+
+    max_output_tokens mặc định CAO (mỗi lượt phải trả về TOÀN BỘ knowledge graph của cả batch,
+    không phải diff -- batch càng lớn/càng nhiều field thì response càng dài; response bị cắt
+    cụt giữa chừng sẽ KHÔNG parse được JSON, gây lỗi "Không parse được khối JSON hợp lệ")."""
     if model_name == "gemini":
         from google.genai import types
 
         response = gemini_client.models.generate_content(
             model=gemini_model, contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.7, max_output_tokens=8192),
+            config=types.GenerateContentConfig(temperature=0.7, max_output_tokens=max_output_tokens),
         )
         return response.text or ""
 
     response = openai_client.chat.completions.create(
         model=openai_model, messages=[{"role": "user", "content": prompt}],
-        temperature=0.7, max_tokens=8192,
+        temperature=0.7, max_tokens=max_output_tokens,
     )
     return response.choices[0].message.content or ""
 
@@ -226,7 +234,8 @@ def run_turn(
     task: str, variant: Optional[str], seed: dict, state: RelayState, model: str, *,
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
-    max_retries: int = DEFAULT_MAX_RETRIES, log_dir: Optional[Path] = None,
+    max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print,
 ) -> Turn:
     """Soạn prompt rồi gọi API NGAY để lấy response -- không còn bước ghi file/chờ người dán.
@@ -243,6 +252,7 @@ def run_turn(
             response = call_model(
                 model, prompt, gemini_client=gemini_client, gemini_model=gemini_model,
                 openai_client=openai_client, openai_model=openai_model,
+                max_output_tokens=max_output_tokens,
             )
             parsed = extract_knowledge_json(response)
             if parsed is None:
@@ -271,7 +281,8 @@ def run_round(
     task: str, variant: Optional[str], seed: dict, state: RelayState, *,
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
-    max_retries: int = DEFAULT_MAX_RETRIES, log_dir: Optional[Path] = None,
+    max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print,
 ) -> bool:
     """Chạy đủ len(state.model_order) turn. Trả True nếu CẢ round này mọi turn đều vote FINAL."""
@@ -281,7 +292,8 @@ def run_round(
             task, variant, seed, state, model,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
-            max_retries=max_retries, log_dir=log_dir, print_fn=print_fn,
+            max_retries=max_retries, max_output_tokens=max_output_tokens,
+            log_dir=log_dir, print_fn=print_fn,
         )
         print_fn(f"  round {turn.round_index} [{turn.model}] vote={turn.consensus_vote} "
                   f"parsed={'ok' if turn.parsed_knowledge else 'lỗi'}")
@@ -294,7 +306,8 @@ def run_relay(
     model_order: Optional[list[str]] = None, max_rounds: int = DEFAULT_MAX_ROUNDS,
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
-    max_retries: int = DEFAULT_MAX_RETRIES, log_dir: Optional[Path] = None,
+    max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print, resume_state: Optional[RelayState] = None,
 ) -> RelayState:
     state = resume_state or RelayState(task=task, variant=variant, model_order=model_order or DEFAULT_MODEL_ORDER, max_rounds=max_rounds)
@@ -305,7 +318,8 @@ def run_relay(
             task, variant, seed, state,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
-            max_retries=max_retries, log_dir=log_dir, print_fn=print_fn,
+            max_retries=max_retries, max_output_tokens=max_output_tokens,
+            log_dir=log_dir, print_fn=print_fn,
         )
         if consensus:
             state.stopped_reason = "consensus"
@@ -388,7 +402,8 @@ def run_relay_batched(
     batch_size: Optional[int] = None, max_workers: int = 4,
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
-    max_retries: int = DEFAULT_MAX_RETRIES, log_dir: Optional[Path] = None,
+    max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print, resume_states: Optional[list] = None,
 ) -> list[RelayState]:
     """batch_size=None -> chạy y hệt run_relay() với seed gốc (1 phần tử list trả về) -- giữ
@@ -402,7 +417,8 @@ def run_relay_batched(
             task, batches[0], variant=variant, model_order=model_order, max_rounds=max_rounds,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
-            max_retries=max_retries, log_dir=log_dir, print_fn=print_fn, resume_state=resume_states[0],
+            max_retries=max_retries, max_output_tokens=max_output_tokens,
+            log_dir=log_dir, print_fn=print_fn, resume_state=resume_states[0],
         )
         return [state]
 
@@ -414,7 +430,8 @@ def run_relay_batched(
             task, batch_seed, variant=variant, model_order=model_order, max_rounds=max_rounds,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
-            max_retries=max_retries, log_dir=batch_log_dir, print_fn=print_fn, resume_state=resume_states[i],
+            max_retries=max_retries, max_output_tokens=max_output_tokens,
+            log_dir=batch_log_dir, print_fn=print_fn, resume_state=resume_states[i],
         )
 
     states: list = [None] * len(batches)
@@ -538,6 +555,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--model-order", default=",".join(DEFAULT_MODEL_ORDER), help="Danh sách model, phân tách bởi dấu phẩy (giá trị đầu tiên PHẢI hiểu là Gemini nếu là chuỗi \"gemini\", còn lại đều gọi qua OpenAI-compatible client).")
     p1.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p1.add_argument("--max-output-tokens", type=int, default=DEFAULT_MAX_OUTPUT_TOKENS, help="Tăng nếu batch lớn/knowledge dài bị cắt cụt (lỗi 'Không parse được khối JSON hợp lệ').")
     p1.add_argument("--batch-size", type=int, default=None, help="Chia candidate thành nhiều batch (mặc định None = 1 batch duy nhất, đúng hành vi cũ).")
     p1.add_argument("--max-workers", type=int, default=4, help="Số batch chạy song song (chỉ có ý nghĩa khi --batch-size được set).")
     p1.add_argument("--log-dir", default=None, help="Optional: ghi lại prompt/response từng lượt để audit.")
@@ -575,7 +593,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             batch_size=args.batch_size, max_workers=args.max_workers,
             gemini_client=gemini_client, gemini_model=args.gemini_model,
             openai_client=openai_client, openai_model=args.openai_model,
-            max_retries=args.max_retries, log_dir=log_dir, resume_states=resume_states,
+            max_retries=args.max_retries, max_output_tokens=args.max_output_tokens,
+            log_dir=log_dir, resume_states=resume_states,
         )
         save_batch_states(states, state_path)
 
