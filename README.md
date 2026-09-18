@@ -65,7 +65,8 @@ cp src/test_set/datasets_qa/benchmark_qa/run/config.env.example \
 | `RELEASE_HF_TRANSCRIPTS_JSON_PATH` | không | Corpus **có audio** (tạo sample mới) |
 | `VIETNAMESE_SPEECH_QA_LOCAL_DIR` | không | `local_dir` tải Vietnamese-Speech-QA |
 | `HF_SPEECH_REPO` / `HF_SOUND_REPO` | không | Repo đích khi push |
-| `DEBATE_MODE` | không (mặc định `manual`) | `api` hoặc `manual` |
+| `DEBATE_MODE` | không (mặc định `api`) | `api` (2 API tự debate) hoặc `manual` (copy-paste) |
+| `GEMINI_MODEL` / `OPENAI_MODEL` | không | Model mạnh cho debate + lọc (mặc định `gemini-3.1-pro-preview` / `cx/gpt-5.6-luna`) |
 
 > Hai token **bắt buộc nằm trong `.env`**, không nhận qua `--hf-token/--hf-write-token`.
 
@@ -110,23 +111,29 @@ bash run/benchmark_qa.sh inspect knowledge-status
 
 ### 2.4 Danh sách subcommand
 
+> **Luồng chuẩn của mọi task**: `[debate --debate-mode manual|api]` → sinh câu hỏi →
+> **lọc 2 API model mạnh** (`filter_qa_pipeline.py`: Gemini `gemini-3.1-pro-preview` rồi OpenAI
+> `cx/gpt-5.6-luna`) → `finalize_qa.py` → `*_final.jsonl`. Chế độ `manual` và `api` chạy y hệt nhau
+> ở mọi bước sau debate. Bỏ qua lọc bằng `--skip-filter`; bước debate chỉ chạy khi `--debate` và
+> `knowledge_<task>.json` chưa có.
+
 | Subcommand | Việc nó chạy |
 |---|---|
 | `fetch-speech` | Tải `MAPPING_REPORT.json` + `test_speech.jsonl` (thêm audio subset bằng `--sino-audio`/`--dialect-audio`) |
 | `fetch-speech-zip` | Tải + giải nén `speech.zip` đã publish |
 | `sound` | ClothoAQA: `build-manifest` → `filter-vn-relevance` → `translate` → `sound_dataset_merge` (thêm `--push` để zip + PR) |
-| `debate` | `build_debate_seed` → `auto_model_relay` (cần `--task`) |
-| `han-viet` | `han_viet_seed_csv` → `word-coverage-report` → `classify-levels` → `apply_knowledge_graph` → `build-samples` → `build-new-word-records` → `generate-questions` → `fill-fields` → `finalize` |
-| `phuong-ngu` | `classify-region` → `generate-questions` → `finalize` |
-| `tu-muon` | `classify-levels` → `generate-questions` → `finalize` |
-| `tu-lay` | 3 variant (`toan_bo`/`van`/`chung`) + cloze cho `toan_bo` → `finalize` |
+| `debate` | `build_debate_seed` → `auto_model_relay` (cần `--task`, `--debate-mode manual|api`) |
+| `han-viet` | `[debate]` → `han_viet_seed_csv` → `word-coverage-report` → `classify-levels` → `apply_knowledge_graph` → `build-samples` → `build-new-word-records` → `generate-questions` → `fill-fields` → **lọc 2 API** → `finalize` |
+| `phuong-ngu` | `[debate]` → `classify-region` → `generate-questions` → **lọc 2 API** → `finalize` |
+| `tu-muon` | `[debate]` → `classify-levels` → `generate-questions` → **lọc 2 API** → `finalize` |
+| `tu-lay` | `[debate]` → 3 variant (`toan_bo`/`van`/`chung`) + cloze cho `toan_bo` → **lọc 2 API** → `finalize` |
 | `finalize` | Chỉ chạy `finalize_qa.py` cho các file pre-final hiện có |
 | `push-hf` | Đẩy file final lên HF (`--target speech|sound|all`) |
-| `code-switching` | `scan-dictionary` → `merge-datasets` → debate → `classify-cs` → `generate-questions` → `filter-questions` (Gemini rồi OpenAI) |
+| `code-switching` | `scan-dictionary` → `merge-datasets` → debate → `classify-cs` → `generate-questions` → **lọc 2 API** → `finalize` |
 | `code-switching-mmsu` | Nhánh MMSU: `build-manifest` 111 sample Code-switching |
 | `inspect` | `tree` / `stats` / `sample` / `head` / `knowledge-status` |
 | `local-preprocess` | Tiền xử lý local-only (`--task tu-muon|tu-lay`) |
-| `all` | Chạy toàn bộ luồng (có `--skip-*`) |
+| `all` | sound + 4 task + code-switching (có `--skip-*`) |
 
 ### 2.5 Cờ dùng chung
 
@@ -136,12 +143,46 @@ bash run/benchmark_qa.sh inspect knowledge-status
 --knowledge-dir DIR               --full-transcripts-json FILE
 --release-hf-transcripts-json F   --speech-local-dir DIR
 --python BIN                      --task NAME
---variant toan_bo|van|chung|all   --provider gemini|openai
---target speech|sound|all         --on-missing skip|raise
+--variant toan_bo|van|chung|all   --target speech|sound|all
+--on-missing skip|raise           --debate
+--debate-mode api|manual          (mặc định: api)
+--gemini-model NAME               (mặc định: gemini-3.1-pro-preview)
+--openai-model NAME               (mặc định: cx/gpt-5.6-luna)
+--gemini-base-url URL --openai-base-url URL --openai-api-key-file FILE --env-file FILE
 --model --batch-size --max-workers --max-retries --max-rounds --seed
+--skip-filter
 --push    --with-debate    --skip-sound --skip-han-viet --skip-phuong-ngu
---skip-tu-muon --skip-tu-lay --skip-finalize --skip-push    --dry-run
+--skip-tu-muon --skip-tu-lay --skip-code-switching --skip-push    --dry-run
 ```
+
+### 2.5b Lệnh chạy luồng 2 API debate + lọc 2 API (model mạnh)
+
+```bash
+# Toàn bộ (4 task + code-switching), debate tự động 2 API
+bash run/benchmark_qa.sh all --location drive --debate-mode api
+
+# Toàn bộ, debate copy-paste thủ công -- các bước sau debate chạy Y HỆT chế độ api
+bash run/benchmark_qa.sh all --location local --debate-mode manual
+
+# 1 task kèm debate trước khi sinh (chỉ debate khi knowledge_<task>.json chưa có)
+bash run/benchmark_qa.sh code-switching --location local --debate --debate-mode api
+bash run/benchmark_qa.sh tu-lay --location drive --debate --debate-mode api
+bash run/benchmark_qa.sh han-viet --location drive --debate --debate-mode api
+
+# Chỉ đổi model mạnh dùng cho debate + 2 lượt lọc
+bash run/benchmark_qa.sh all --location local --debate-mode api \
+  --gemini-model gemini-3.1-pro-preview --openai-model cx/gpt-5.6-luna
+
+# Bỏ bước lọc (chỉ finalize), hoặc đổi cấp độ lọc
+bash run/benchmark_qa.sh tu-lay --debate --skip-filter
+```
+
+`filter_qa_pipeline.py` dùng **prompt lọc chi tiết theo từng task** (tiêu chí chung: tự nhiên /
+đa dạng / độ khó thực chất / nhiễu hợp lý / không lộ đáp án / chống đoán mò) cộng tiêu chí đặc thù:
+Phương ngữ (câu phải hỏi vùng/dân tộc), Từ láy (cloze Tone Harmony: đáp án là từ láy toàn bộ hợp lệ,
+không bắc cầu âm vực; loại "nhẹ nhẹ" nếu phải "nhè nhẹ"), Hán Việt / Từ mượn (đúng level, fact
+lịch sử thật), Code-switching (6 loại A–F). Filter gửi kèm context (`base_word`, `tone_register`,
+`region_or_ethnic_group`, `level`, `historical_fact`) để chấm chính xác.
 
 ### 2.6 Kiểm tra nhanh dữ liệu
 
@@ -179,8 +220,13 @@ pipeline tự bỏ qua và để Gemini tự quyết định (kém robust hơn n
 
 Deploy:
 ```bash
+# Chạy riêng bước debate (manual hoặc api -- cùng xuất knowledge graph)
 bash run/benchmark_qa.sh debate --task code_switching --location local --debate-mode manual
 bash run/benchmark_qa.sh debate --task han_viet       --location drive --debate-mode api
+
+# Hoặc gộp debate vào chính task (chỉ debate nếu knowledge_<task>.json chưa có)
+bash run/benchmark_qa.sh han-viet --location drive --debate --debate-mode api
+bash run/benchmark_qa.sh tu-lay   --location drive --debate --debate-mode api
 ```
 
 ### 3.2 Sound (`test_sound.jsonl`)
@@ -224,7 +270,10 @@ push lên HF**; pre-final ở lại để debug.
 - **Nhánh dữ liệu thật**: `scan-dictionary` khớp từ điển `cs_broad_new.txt` vào GigaSpeech2-vi
   (khớp token chính xác), `merge-datasets` hợp nhất với ViMed (đã có `cs_terms` xác thực) →
   `code_switching_qa.jsonl`. Sau đó debate (`auto_model_relay`, batch 24) → `classify-cs` →
-  `generate-questions` (6 loại A–F) → `filter-questions` 2 lượt (Gemini rồi OpenAI).
+  `generate-questions` (6 loại A–F) → **`filter-questions` 2 lượt** (`--gemini-model`
+  `gemini-3.1-pro-preview` rồi `--openai-model` `cx/gpt-5.6-luna`) → `finalize_qa.py` →
+  `code_switching_openai_kept_final.jsonl`.
+- Chạy trọn luồng: `bash run/benchmark_qa.sh code-switching --location local --debate --debate-mode api`.
 
 ---
 

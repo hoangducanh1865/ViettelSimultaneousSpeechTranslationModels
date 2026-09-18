@@ -25,6 +25,8 @@ _RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${ON_MISSING:=skip}"
 : "${PUSH:=0}"
 : "${WITH_DEBATE:=0}"
+: "${DEBATE:=0}"          # --debate: chạy debate (manual|api) trước khi sinh câu hỏi
+: "${SKIP_FILTER:=0}"     # --skip-filter: bỏ bước lọc 2 API
 : "${MAX_ROUNDS:=}"
 : "${BATCH_SIZE:=}"
 : "${MAX_WORKERS:=}"
@@ -36,6 +38,7 @@ _RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${SKIP_PHUONG_NGU:=0}"
 : "${SKIP_TU_MUON:=0}"
 : "${SKIP_TU_LAY:=0}"
+: "${SKIP_CODE_SWITCHING:=0}"
 : "${SKIP_FINALIZE:=0}"
 : "${SKIP_PUSH:=0}"
 : "${_INITIALIZED:=0}"
@@ -48,22 +51,26 @@ benchmark_qa.sh -- pipeline xây benchmark QA (sound + 4 task "hiện tượng �
 CÁCH DÙNG:
     bash run/benchmark_qa.sh <subcommand> [flags]
 
+LUỒNG CHUẨN (mọi task): debate (manual HOẶC api) -> sinh câu hỏi -> LỌC 2 API model mạnh
+(Gemini gemini-3.1-pro-preview rồi OpenAI cx/gpt-5.6-luna) -> finalize_qa.py -> file *_final.jsonl.
+Manual và api chạy Y HỆT nhau ở các bước sau debate.
+
 SUBCOMMAND:
     fetch-speech          Tải MAPPING_REPORT.json + test_speech.jsonl (và audio subset nếu chọn)
     fetch-speech-zip      Tải + giải nén speech.zip đã publish
     sound                 ClothoAQA: build-manifest -> lọc VN -> dịch -> merge MMAU (--push để PR)
-    debate                Tri thức nền: build_debate_seed -> auto_model_relay (--task BẮT BUỘC)
-    han-viet              Hán Việt: seed csv -> coverage -> classify -> KG -> samples -> generate -> finalize
-    phuong-ngu            Phương ngữ: classify-region -> generate-questions -> finalize
-    tu-muon               Từ mượn: classify-levels -> generate-questions -> finalize
-    tu-lay                Từ láy: 3 variant (+ cloze cho toan_bo) -> finalize
+    debate                Tri thức nền cho 1 task: build_debate_seed -> auto_model_relay (--task BẮT BUỘC)
+    han-viet              Hán Việt: [debate] -> seed csv -> coverage -> classify -> KG -> samples -> generate -> LỌC 2 API -> finalize
+    phuong-ngu            Phương ngữ: [debate] -> classify-region -> generate-questions -> LỌC 2 API -> finalize
+    tu-muon               Từ mượn: [debate] -> classify-levels -> generate-questions -> LỌC 2 API -> finalize
+    tu-lay                Từ láy: [debate] -> 3 variant (+ cloze toan_bo) -> LỌC 2 API -> finalize
     finalize              Chỉ chạy finalize_qa.py cho các file pre-final hiện có
     push-hf               Đẩy file final lên HF (--target speech|sound|all)
-    code-switching        Trích xuất thông tin: scan-dictionary -> merge -> debate -> classify -> generate -> filter x2
+    code-switching        Trích xuất thông tin: scan-dictionary -> merge -> debate -> classify -> generate -> LỌC 2 API -> finalize
     code-switching-mmsu   Nhánh MMSU: build-manifest subset Code-switching (111 sample)
     inspect               Thống kê/in manifest: <tree|stats|sample|head|knowledge-status>
     local-preprocess      Tiền xử lý local-only (--task tu-muon|tu-lay), cần stuff/benchmark_qa/
-    all                   Chạy toàn bộ luồng (có thể skip từng phần)
+    all                   Chạy toàn bộ (sound + 4 task + code-switching), có thể skip từng phần
 
 FLAG DÙNG CHUNG:
     --location drive|local            (mặc định: drive)
@@ -77,14 +84,21 @@ FLAG DÙNG CHUNG:
     --python BIN                      (mặc định: python3)
     --task NAME                       (debate / local-preprocess)
     --variant toan_bo|van|chung|all   (tu-lay; mặc định: all)
-    --provider gemini|openai          (code-switching filter-questions)
     --target speech|sound|all         (push-hf; mặc định: all)
     --on-missing skip|raise           (finalize; mặc định: skip)
-    --model NAME --batch-size N --max-workers N --max-retries N --max-rounds N --seed N
+    --debate                          Chạy debate (--debate-mode) TRƯỚC khi sinh câu hỏi cho task
+    --debate-mode api|manual          (mặc định: api) 2 API tự debate, hoặc copy-paste thủ công
+    --gemini-model NAME               (mặc định: gemini-3.1-pro-preview)
+    --openai-model NAME               (mặc định: cx/gpt-5.6-luna)
+    --gemini-base-url URL --openai-base-url URL
+    --openai-api-key-file FILE        Key OpenAI-compatible khi không dùng .env
+    --env-file FILE                   File .env local (KEY="value" # base_url # model)
+    --model --batch-size --max-workers --max-retries --max-rounds --seed
+    --skip-filter                     Bỏ bước lọc 2 API (chỉ finalize trực tiếp)
     --push                            sound: zip + tạo PR lên HF
-    --with-debate                     all: chạy thêm bước debate
+    --with-debate                     all: tương đương --debate cho mọi task
     --skip-sound --skip-han-viet --skip-phuong-ngu --skip-tu-muon --skip-tu-lay
-    --skip-finalize --skip-push       all: bỏ qua phần tương ứng
+    --skip-code-switching --skip-finalize --skip-push
     --dry-run                         In lệnh sẽ chạy, không thực thi
     -h|--help
 
@@ -93,11 +107,11 @@ TOKEN (BẮT BUỘC ĐẶT TRONG .env, KHÔNG truyền qua flag):
     HF_WRITE_TOKEN     tạo PR lên HF (sound --push, push-hf)
 
 VÍ DỤ:
-    bash run/benchmark_qa.sh all --location drive
+    bash run/benchmark_qa.sh all --location drive --debate-mode api
+    bash run/benchmark_qa.sh all --location local --debate-mode manual
+    bash run/benchmark_qa.sh code-switching --location local --debate --debate-mode api
+    bash run/benchmark_qa.sh tu-lay --debate --debate-mode api --location drive
     bash run/benchmark_qa.sh sound --location drive --push
-    bash run/benchmark_qa.sh debate --task code_switching --location local --debate-mode manual
-    bash run/benchmark_qa.sh tu-lay --variant toan_bo --location drive
-    bash run/benchmark_qa.sh inspect tree /path/test_sound.jsonl
     bash run/benchmark_qa.sh inspect knowledge-status
 EOF
 }
@@ -121,19 +135,28 @@ parse_common() {
             --provider)                    PROVIDER="$2"; shift 2 ;;
             --target)                      TARGET="$2"; shift 2 ;;
             --model)                       MODEL="$2"; shift 2 ;;
+            --gemini-model)                GEMINI_MODEL="$2"; shift 2 ;;
+            --openai-model)                OPENAI_MODEL="$2"; shift 2 ;;
+            --gemini-base-url)             GEMINI_BASE_URL="$2"; shift 2 ;;
+            --openai-base-url)             OPENAI_BASE_URL="$2"; shift 2 ;;
+            --openai-api-key-file)         OPENAI_API_KEY_FILE="$2"; shift 2 ;;
+            --env-file)                    ENV_FILE="$2"; shift 2 ;;
             --batch-size)                  BATCH_SIZE="$2"; shift 2 ;;
             --max-workers)                 MAX_WORKERS="$2"; shift 2 ;;
             --max-retries)                 MAX_RETRIES="$2"; shift 2 ;;
             --max-rounds)                  MAX_ROUNDS="$2"; shift 2 ;;
             --seed)                        SEED="$2"; shift 2 ;;
             --on-missing)                  ON_MISSING="$2"; shift 2 ;;
+            --debate)                      DEBATE=1; shift ;;
+            --skip-filter)                 SKIP_FILTER=1; shift ;;
             --push)                        PUSH=1; shift ;;
-            --with-debate)                 WITH_DEBATE=1; shift ;;
+            --with-debate)                 WITH_DEBATE=1; DEBATE=1; shift ;;
             --skip-sound)                  SKIP_SOUND=1; shift ;;
             --skip-han-viet)               SKIP_HAN_VIET=1; shift ;;
             --skip-phuong-ngu)             SKIP_PHUONG_NGU=1; shift ;;
             --skip-tu-muon)                SKIP_TU_MUON=1; shift ;;
             --skip-tu-lay)                 SKIP_TU_LAY=1; shift ;;
+            --skip-code-switching)         SKIP_CODE_SWITCHING=1; shift ;;
             --skip-finalize)               SKIP_FINALIZE=1; shift ;;
             --skip-push)                   SKIP_PUSH=1; shift ;;
             --dry-run)                     DRY_RUN=1; shift ;;
@@ -170,6 +193,86 @@ finalize_file() {
     [[ -f "$pre" ]] || { warn "bỏ qua finalize (không có file): $pre"; return 0; }
     local final="${pre%.jsonl}_final.jsonl"
     py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$pre" --final "$final" --on-missing "$ON_MISSING"
+}
+
+# Chạy debate (manual|api) trước khi sinh câu hỏi, nếu --debate/--with-debate được bật.
+# Chỉ chạy khi knowledge_<task>[_<variant>].json CHƯA có (nếu đã có thì dùng luôn, không debate lại).
+# Manual và api chạy Y HỆT nhau ở mọi bước sau (cùng xuất knowledge graph).
+ensure_debate() {
+    local task="$1" variant="${2:-}"
+    [[ "${DEBATE}" == "1" ]] || return 0
+    local suffix=""; [[ -n "$variant" ]] && suffix="_${variant}"
+    local kg="${KNOWLEDGE_DIR}/knowledge_${task}${suffix}.json"
+    if [[ -f "$kg" ]]; then
+        log "đã có $kg -- bỏ qua debate (dùng knowledge graph sẵn có)."
+        return 0
+    fi
+    local saved_task="$TASK" saved_variant="$VARIANT"
+    local saved_extra=("${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}")
+    TASK="$task"; VARIANT="$variant"
+    # Gom bằng chứng thật sẵn có của task để build seed (bỏ qua nếu chưa có file).
+    local seed_args=()
+    case "$task" in
+        han_viet)
+            [[ -f "$HAN_VIET_SEED_CSV" ]] && seed_args+=(--candidate-csv "$HAN_VIET_SEED_CSV" --word-col "Từ Hán Việt")
+            [[ -f "$HAN_VIET_COVERAGE_REPORT" ]] && seed_args+=(--coverage-report "$HAN_VIET_COVERAGE_REPORT")
+            ;;
+        phuong_ngu)
+            [[ -f "$PHUONG_NGU_COVERAGE_REPORT" ]] && seed_args+=(--coverage-report "$PHUONG_NGU_COVERAGE_REPORT")
+            ;;
+        tu_muon)
+            [[ -f "$TU_MUON_CSV_PATH" ]] && seed_args+=(--candidate-csv "$TU_MUON_CSV_PATH" --word-col "Từ Tiếng Việt (Việt Hóa)")
+            ;;
+        tu_lay)
+            [[ -f "$TU_LAY_VARIANT_CSV" ]] && seed_args+=(--candidate-csv "$TU_LAY_VARIANT_CSV" --word-col "Từ láy")
+            ;;
+    esac
+    EXTRA_ARGS=("${seed_args[@]+"${seed_args[@]}"}")
+    log "debate trước khi sinh: task=$task variant=${variant:-<không>} mode=$DEBATE_MODE"
+    cmd_debate
+    EXTRA_ARGS=("${saved_extra[@]+"${saved_extra[@]}"}")
+    TASK="$saved_task"; VARIANT="$saved_variant"
+}
+
+# Dựng FILTER_ARGS cho filter_qa_pipeline.py theo provider (gemini|openai).
+FILTER_ARGS=()
+_filter_provider_args() {
+    local provider="$1"
+    FILTER_ARGS=(--provider "$provider" --location "$LOCATION")
+    if [[ "$provider" == "gemini" ]]; then
+        [[ -n "$GEMINI_MODEL" ]] && FILTER_ARGS+=(--model "$GEMINI_MODEL")
+        [[ -n "$GEMINI_BASE_URL" ]] && FILTER_ARGS+=(--gemini-base-url "$GEMINI_BASE_URL")
+        [[ -f "$SERVICE_ACCOUNT_JSON" ]] && FILTER_ARGS+=(--service-account-json "$SERVICE_ACCOUNT_JSON")
+    else
+        [[ -n "$OPENAI_MODEL" ]] && FILTER_ARGS+=(--model "$OPENAI_MODEL")
+        [[ -n "$OPENAI_BASE_URL" ]] && FILTER_ARGS+=(--openai-base-url "$OPENAI_BASE_URL")
+        [[ -n "$OPENAI_API_KEY_FILE" ]] && FILTER_ARGS+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
+    fi
+    [[ -n "$ENV_FILE" ]] && FILTER_ARGS+=(--env-file "$ENV_FILE")
+    [[ -n "$BATCH_SIZE" ]] && FILTER_ARGS+=(--batch-size "$BATCH_SIZE")
+    [[ -n "$MAX_WORKERS" ]] && FILTER_ARGS+=(--max-workers "$MAX_WORKERS")
+    [[ -n "$MAX_RETRIES" ]] && FILTER_ARGS+=(--max-retries "$MAX_RETRIES")
+    return 0
+}
+
+# Lọc pre-final qua 2 API model mạnh (gemini rồi openai) -> finalize file final.
+run_filter_2api() {
+    local task="$1" pre="$2" final="$3"
+    if [[ "${SKIP_FILTER}" == "1" ]]; then
+        warn "bỏ qua lọc 2 API cho $pre (--skip-filter) -- finalize trực tiếp."
+        finalize_file "$pre"
+        return 0
+    fi
+    filtered_paths "$pre" "$final"
+    _filter_provider_args gemini
+    py "$FILTER_QA_PIPELINE" filter-qa --task "$task" \
+        --pre-final "$pre" --kept-output "$FILTER_GEM_JSONL" --rules-output "$FILTER_GEM_RULES" \
+        "${FILTER_ARGS[@]}"
+    _filter_provider_args openai
+    py "$FILTER_QA_PIPELINE" filter-qa --task "$task" \
+        --pre-final "$FILTER_GEM_JSONL" --kept-output "$FILTER_OAI_JSONL" --rules-output "$FILTER_OAI_RULES" \
+        "${FILTER_ARGS[@]}"
+    py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$FILTER_OAI_JSONL" --final "$final" --on-missing "$ON_MISSING"
 }
 
 # =============================================================================================
@@ -273,7 +376,12 @@ cmd_debate() {
         [[ -n "$MAX_WORKERS" ]] && relay_args+=(--max-workers "$MAX_WORKERS")
     fi
     [[ -n "$MAX_RETRIES" ]] && relay_args+=(--max-retries "$MAX_RETRIES")
-    [[ -n "$MODEL" ]] && relay_args+=(--gemini-model "$MODEL")
+    # Model MẠNH cho cả 2 vai; --model là alias override Gemini (tương thích ngược).
+    relay_args+=(--gemini-model "${MODEL:-$GEMINI_MODEL}" --openai-model "$OPENAI_MODEL")
+    [[ -n "$GEMINI_BASE_URL" ]] && relay_args+=(--gemini-base-url "$GEMINI_BASE_URL")
+    [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
+    [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
+    [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
 
     py "${HIEN_TUONG_SRC_DIR}/auto_model_relay.py" "${relay_args[@]}"
 }
@@ -289,8 +397,6 @@ cmd_han_viet() {
     local kg="${KNOWLEDGE_DIR}/knowledge_han_viet.json"
     local sa
     sa="$(gemini_service_account_arg)"
-    local knowledge_args=()
-    if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- classify/generate chạy không KG."; fi
 
     # Bước 0: seed CSV + báo cáo độ phủ
     py "${HAN_VIET_SRC_DIR}/han_viet_seed_csv.py" --input "$HAN_VIET_INPUT_PATH" --out-csv "$HAN_VIET_SEED_CSV"
@@ -298,6 +404,13 @@ cmd_han_viet() {
         --csv "$HAN_VIET_SEED_CSV" --word-col "Từ Hán Việt" \
         --full-transcripts-json "$FULL_TRANSCRIPTS_JSON_PATH" \
         --out-json "$HAN_VIET_COVERAGE_REPORT"
+
+    # Debate (nếu --debate) -- dùng seed CSV + coverage vừa tạo
+    ensure_debate han_viet
+
+    # knowledge_args tính SAU debate để dùng được KG vừa sinh
+    local knowledge_args=()
+    if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- classify/generate chạy không KG."; fi
 
     # Bước 1: phân loại mức độ
     py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" classify-levels \
@@ -336,7 +449,7 @@ cmd_han_viet() {
         --multihop "$HAN_VIET_MULTIHOP_OUTPUT" \
         --original "$TEST_SPEECH_JSONL"
 
-    finalize_file "$HAN_VIET_MULTIHOP_OUTPUT"
+    run_filter_2api han_viet "$HAN_VIET_MULTIHOP_OUTPUT" "$HAN_VIET_FINAL_QA"
 }
 
 # =============================================================================================
@@ -344,6 +457,7 @@ cmd_han_viet() {
 # =============================================================================================
 cmd_phuong_ngu() {
     _cmd_prelude "$@"
+    ensure_debate phuong_ngu
     local kg="${KNOWLEDGE_DIR}/knowledge_phuong_ngu.json"
     local sa
     sa="$(gemini_service_account_arg)"
@@ -361,7 +475,7 @@ cmd_phuong_ngu() {
         --output "$PHUONG_NGU_QA_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
 
-    finalize_file "$PHUONG_NGU_QA_OUTPUT"
+    run_filter_2api phuong_ngu "$PHUONG_NGU_QA_OUTPUT" "$PHUONG_NGU_FINAL_QA"
 }
 
 # =============================================================================================
@@ -369,6 +483,7 @@ cmd_phuong_ngu() {
 # =============================================================================================
 cmd_tu_muon() {
     _cmd_prelude "$@"
+    ensure_debate tu_muon
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_muon.json"
     local sa
     sa="$(gemini_service_account_arg)"
@@ -388,7 +503,7 @@ cmd_tu_muon() {
         --output "$TU_MUON_MULTIHOP_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
 
-    finalize_file "$TU_MUON_MULTIHOP_OUTPUT"
+    run_filter_2api tu_muon "$TU_MUON_MULTIHOP_OUTPUT" "$TU_MUON_FINAL_QA"
 }
 
 # =============================================================================================
@@ -398,6 +513,7 @@ TU_LAY_CLOZE_SAMPLES=""
 cmd_tu_lay_variant() {
     local variant="$1"
     tu_lay_variant_paths "$variant"
+    ensure_debate tu_lay "$variant"
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_lay_${variant}.json"
     local sa
     sa="$(gemini_service_account_arg)"
@@ -417,7 +533,7 @@ cmd_tu_lay_variant() {
         --output "$TU_LAY_VARIANT_MULTIHOP" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
 
-    finalize_file "$TU_LAY_VARIANT_MULTIHOP"
+    run_filter_2api tu_lay "$TU_LAY_VARIANT_MULTIHOP" "$TU_LAY_VARIANT_FINAL_QA"
 }
 
 cmd_tu_lay_cloze() {
@@ -435,7 +551,7 @@ cmd_tu_lay_cloze() {
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$cloze_output"
 
-    finalize_file "$cloze_output"
+    run_filter_2api tu_lay "$cloze_output" "${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa_final.jsonl"
 }
 
 cmd_tu_lay() {
@@ -530,16 +646,38 @@ cmd_code_switching() {
     # 2. Tri thức nền (debate) -- build_debate_seed mặc định theo task code_switching
     py "${HIEN_TUONG_SRC_DIR}/build_debate_seed.py" --task code_switching --location "$LOCATION"
     local rounds="${MAX_ROUNDS:-10}"
-    py "${HIEN_TUONG_SRC_DIR}/auto_model_relay.py" run --task code_switching \
-        --location "$LOCATION" --debate-mode "$DEBATE_MODE" \
-        --max-rounds "$rounds" \
-        --batch-size "${BATCH_SIZE:-24}" --max-workers "${MAX_WORKERS:-8}"
+    local relay_args=(run --task code_switching --location "$LOCATION" --debate-mode "$DEBATE_MODE"
+        --max-rounds "$rounds" --batch-size "${BATCH_SIZE:-24}" --max-workers "${MAX_WORKERS:-8}"
+        --gemini-model "$GEMINI_MODEL" --openai-model "$OPENAI_MODEL")
+    [[ -n "$GEMINI_BASE_URL" ]] && relay_args+=(--gemini-base-url "$GEMINI_BASE_URL")
+    [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
+    [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
+    [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
+    py "${HIEN_TUONG_SRC_DIR}/auto_model_relay.py" "${relay_args[@]}"
 
-    # 3. Sinh câu hỏi + lọc 2 lượt
+    # 3. Sinh câu hỏi
     py "$cs_qa" classify-cs --location "$LOCATION"
     py "$cs_qa" generate-questions --location "$LOCATION"
-    py "$cs_qa" filter-questions --provider gemini --location "$LOCATION"
-    py "$cs_qa" filter-questions --provider openai --location "$LOCATION"
+
+    # 4. Lọc 2 lượt (model mạnh) rồi finalize
+    if [[ "${SKIP_FILTER}" == "1" ]]; then
+        warn "bỏ qua lọc 2 API code-switching (--skip-filter) -- finalize trực tiếp."
+        py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$CS_MULTIHOP" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
+    else
+        local gem_filter_args=(--provider gemini --location "$LOCATION" --gemini-model "$GEMINI_MODEL")
+        local oai_filter_args=(--provider openai --location "$LOCATION" --openai-model "$OPENAI_MODEL")
+        [[ -f "$SERVICE_ACCOUNT_JSON" ]] && gem_filter_args+=(--service-account-json "$SERVICE_ACCOUNT_JSON")
+        [[ -n "$GEMINI_BASE_URL" ]] && gem_filter_args+=(--gemini-base-url "$GEMINI_BASE_URL")
+        [[ -n "$OPENAI_API_KEY_FILE" ]] && oai_filter_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
+        [[ -n "$OPENAI_BASE_URL" ]] && oai_filter_args+=(--openai-base-url "$OPENAI_BASE_URL")
+        [[ -n "$ENV_FILE" ]] && { gem_filter_args+=(--env-file "$ENV_FILE"); oai_filter_args+=(--env-file "$ENV_FILE"); }
+        [[ -n "$BATCH_SIZE" ]] && { gem_filter_args+=(--batch-size "$BATCH_SIZE"); oai_filter_args+=(--batch-size "$BATCH_SIZE"); }
+        [[ -n "$MAX_WORKERS" ]] && { gem_filter_args+=(--max-workers "$MAX_WORKERS"); oai_filter_args+=(--max-workers "$MAX_WORKERS"); }
+        [[ -n "$MAX_RETRIES" ]] && { gem_filter_args+=(--max-retries "$MAX_RETRIES"); oai_filter_args+=(--max-retries "$MAX_RETRIES"); }
+        py "$cs_qa" filter-questions "${gem_filter_args[@]}"
+        py "$cs_qa" filter-questions "${oai_filter_args[@]}"
+        py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$CS_OPENAI_KEPT" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
+    fi
 }
 
 # =============================================================================================
@@ -621,14 +759,13 @@ cmd_local_preprocess() {
 # =============================================================================================
 cmd_all() {
     _cmd_prelude "$@"
-    log "=== all: bắt đầu (location=$LOCATION, dry_run=$DRY_RUN) ==="
+    log "=== all: bắt đầu (location=$LOCATION, debate=$DEBATE/$DEBATE_MODE, dry_run=$DRY_RUN) ==="
     if [[ "$SKIP_SOUND" == "0" ]]; then cmd_sound; else log "bỏ qua sound"; fi
-    if [[ "$WITH_DEBATE" == "1" ]]; then log "(--with-debate: chạy debate riêng cho từng task nếu cần)"; fi
     if [[ "$SKIP_HAN_VIET" == "0" ]]; then cmd_han_viet; else log "bỏ qua han-viet"; fi
     if [[ "$SKIP_PHUONG_NGU" == "0" ]]; then cmd_phuong_ngu; else log "bỏ qua phuong-ngu"; fi
     if [[ "$SKIP_TU_MUON" == "0" ]]; then cmd_tu_muon; else log "bỏ qua tu-muon"; fi
     if [[ "$SKIP_TU_LAY" == "0" ]]; then cmd_tu_lay; else log "bỏ qua tu-lay"; fi
-    if [[ "$SKIP_FINALIZE" == "0" ]]; then cmd_finalize; else log "bỏ qua finalize"; fi
+    if [[ "$SKIP_CODE_SWITCHING" == "0" ]]; then cmd_code_switching; else log "bỏ qua code-switching"; fi
     if [[ "$PUSH" == "1" && "$SKIP_PUSH" == "0" ]]; then
         cmd_push_hf
     else

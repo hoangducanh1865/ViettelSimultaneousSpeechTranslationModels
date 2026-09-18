@@ -41,8 +41,15 @@ _load_env_file "${_RUN_DIR}/.env"
 : "${REPO_DIR:=${DEFAULT_REPO_DIR}}"
 : "${LOCATION:=drive}"
 : "${PYTHON:=python3}"
-: "${DEBATE_MODE:=manual}"
+: "${DEBATE_MODE:=api}"                 # api (2 API tự debate) hoặc manual (copy-paste) -- 2 chế độ chạy Y HỆT các bước sau
 : "${DRY_RUN:=0}"
+# Model MẠNH dùng cho bước debate + 2 lượt lọc (có thể override bằng flag tương ứng).
+: "${GEMINI_MODEL:=gemini-3.1-pro-preview}"
+: "${OPENAI_MODEL:=cx/gpt-5.6-luna}"
+GEMINI_BASE_URL="${GEMINI_BASE_URL:-}"
+OPENAI_BASE_URL="${OPENAI_BASE_URL:-}"
+OPENAI_API_KEY_FILE="${OPENAI_API_KEY_FILE:-}"
+ENV_FILE="${ENV_FILE:-}"
 
 # ---------------------------------------------------------------------------------------------
 # resolve_paths(): tính lại mọi đường dẫn. Gọi SAU khi parse xong flag để --location /
@@ -62,6 +69,7 @@ resolve_paths() {
     TU_MUON_SRC_DIR="${HIEN_TUONG_SRC_DIR}/tu_muon"
     TU_LAY_SRC_DIR="${HIEN_TUONG_SRC_DIR}/tu_lay"
     CODE_SWITCHING_SRC_DIR="${BENCHMARK_QA_SRC_DIR}/speech/trich_xuat_thong_tin/code_switching"
+    FILTER_QA_PIPELINE="${HIEN_TUONG_SRC_DIR}/filter_qa_pipeline.py"
     TOOLS_DIR="${BENCHMARK_QA_SRC_DIR}/tools"
     HF_PR_PUSH="${TRANSLATE_DATASETS_SRC_DIR}/hf_pr_push.py"
 
@@ -117,6 +125,7 @@ resolve_paths() {
 
     PHUONG_NGU_OUT_DIR="${BENCHMARK_QA_SPEECH_DIR}/phuong_ngu"
     PHUONG_NGU_INPUT_PATH="${PHUONG_NGU_OUT_DIR}/phuong_ngu_qa.jsonl"
+    PHUONG_NGU_COVERAGE_REPORT="${PHUONG_NGU_OUT_DIR}/word_coverage_report_phuong_ngu.json"
     PHUONG_NGU_REGION_OUTPUT="${PHUONG_NGU_OUT_DIR}/phuong_ngu_region_labels.jsonl"
     PHUONG_NGU_QA_OUTPUT="${PHUONG_NGU_OUT_DIR}/phuong_ngu_region_qa.jsonl"
     PHUONG_NGU_FINAL_QA="${PHUONG_NGU_OUT_DIR}/phuong_ngu_region_qa_final.jsonl"
@@ -131,6 +140,26 @@ resolve_paths() {
 
     TU_LAY_INPUT_DIR="${QA_DATASETS_DIR}/tu_lay"
     TU_LAY_FINAL_DIR="${BENCHMARK_QA_SPEECH_DIR}/tu_lay"
+
+    # --- Code-switching: output của 2 lượt lọc (filter-questions) + file final ---
+    CS_MULTIHOP="${CODE_SWITCHING_DIR}/code_switching_multihop_qa.jsonl"
+    CS_GEMINI_KEPT="${CODE_SWITCHING_DIR}/code_switching_gemini_kept.jsonl"
+    CS_OPENAI_KEPT="${CODE_SWITCHING_DIR}/code_switching_openai_kept.jsonl"
+    CS_OPENAI_KEPT_FINAL="${CODE_SWITCHING_DIR}/code_switching_openai_kept_final.jsonl"
+}
+
+# Từ 1 file pre-final -> các đường dẫn của bước lọc 2 API + file final.
+# Set: FILTER_GEM_JSONL, FILTER_OAI_JSONL, FILTER_GEM_RULES, FILTER_OAI_RULES, FILTER_FINAL.
+filtered_paths() {
+    local pre="$1" final="$2"
+    local dir stem
+    dir="$(dirname "$pre")"
+    stem="$(basename "${pre%.jsonl}")"
+    FILTER_GEM_JSONL="${dir}/${stem}_gemini_kept.jsonl"
+    FILTER_OAI_JSONL="${dir}/${stem}_openai_kept.jsonl"
+    FILTER_GEM_RULES="${dir}/${stem}_gemini_rules.json"
+    FILTER_OAI_RULES="${dir}/${stem}_openai_rules.json"
+    FILTER_FINAL="${final}"
 }
 
 # Đường dẫn input/output của 1 variant từ láy (gọi sau resolve_paths).
