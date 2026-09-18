@@ -1,0 +1,7 @@
+# Dependency cho bộ test E2E local (tests/benchmark_qa).
+# Cài: pip install -r requirements.txt -r requirements-dev.txt
+pytest>=7.4
+tqdm>=4.66
+openai>=1.0
+google-genai>=0.3
+google-auth>=2.0

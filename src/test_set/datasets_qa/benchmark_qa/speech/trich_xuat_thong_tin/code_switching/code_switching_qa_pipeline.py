@@ -549,26 +549,17 @@ def make_openai_provider_call(openai_client, model: str):
 # CLI
 # ============================================================================================
 
-def _resolve_role_client(service_account_json, env_file, model_arg, role: str, input_path):
-    """TỰ NHẬN DIỆN nguồn credential cho 1 "vai" (GEMINI/OPENAI), giống hệt nguyên tắc
-    auto_model_relay.resolve_clients() -- ưu tiên --service-account-json (Vertex AI thật, chỉ áp
-    dụng cho role="GEMINI"); nếu không có, rơi về --env-file (mặc định ".env" cạnh --input) đọc
-    <role>_API_KEY/base_url/model. Trả về (client, model) -- client có thể là genai.Client (Vertex)
-    hoặc OpenAI-compatible client, auto_model_relay.call_model() tự biết cách gọi đúng."""
-    if role == "GEMINI" and service_account_json:
-        return auto_model_relay.load_gemini_client(service_account_json), (model_arg or DEFAULT_MODEL)
-
-    env_path = Path(env_file) if env_file else Path(input_path).resolve().parent / ".env"
-    env = auto_model_relay.load_env_file(env_path) if env_path.exists() else {}
-    role_env = env.get(role, {})
-    api_key, base_url = role_env.get("api_key"), role_env.get("base_url")
-    model = model_arg or role_env.get("model") or DEFAULT_MODEL
-    if not (api_key and base_url):
-        raise ValueError(
-            f"Không có --service-account-json (role={role}), và không tìm được {role}_API_KEY + "
-            f"base_url hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình."
-        )
-    return auto_model_relay._make_openai_client(api_key, base_url), model
+def _resolve_role_client(service_account_json, env_file, model_arg, role: str, input_path, location: str = "local"):
+    """Ủy quyền cho auto_model_relay.resolve_role_client() (nguồn DUY NHẤT xử lý credential):
+    ưu tiên service account (role GEMINI), nếu không thì đọc .env -> client OpenAI-compatible."""
+    return auto_model_relay.resolve_role_client(
+        role,
+        service_account_json=service_account_json,
+        env_file=env_file,
+        location=location,
+        model=model_arg,
+        input_path=input_path,
+    )
 
 
 def main(argv: Optional[list[str]] = None) -> None:
@@ -628,7 +619,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         knowledge_json = args.knowledge_json or str(env_paths.knowledge_dir(args.location) / "knowledge_code_switching.json")
         output = Path(args.output) if args.output else cs_dir / "code_switching_classified.jsonl"
 
-        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path)
+        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path, args.location)
         records = _load_jsonl(input_path)
         kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         out = classify_cs(
@@ -650,7 +641,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         knowledge_json = args.knowledge_json or str(env_paths.knowledge_dir(args.location) / "knowledge_code_switching.json")
         output = Path(args.output) if args.output else cs_dir / "code_switching_multihop_qa.jsonl"
 
-        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path)
+        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path, args.location)
         records = _load_jsonl(input_path)
         kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         generate_questions(
@@ -679,7 +670,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                 openai_client = auto_model_relay.load_openai_client(Path(args.openai_api_key_file), args.openai_base_url or auto_model_relay.DEFAULT_OPENAI_BASE_URL)
                 openai_model = args.openai_model or auto_model_relay.DEFAULT_OPENAI_MODEL
             else:
-                openai_client, openai_model = _resolve_role_client(None, env_file, args.openai_model, "OPENAI", input_path)
+                openai_client, openai_model = _resolve_role_client(None, env_file, args.openai_model, "OPENAI", input_path, args.location)
             provider_call = make_openai_provider_call(openai_client, openai_model)
 
         filter_questions(

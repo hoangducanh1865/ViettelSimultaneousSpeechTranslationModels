@@ -823,6 +823,53 @@ def load_batch_states(state_output: Path, n_batches: int) -> list[Optional[Relay
     return result
 
 
+def resolve_role_client(
+    role: str, *,
+    service_account_json: Optional[str] = None,
+    env_file: Optional[str] = None,
+    location: str = "drive",
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+    input_path: Optional[Path] = None,
+) -> tuple:
+    """Tự nhận diện credential cho 1 "vai" (GEMINI hoặc OPENAI) -- dùng CHUNG cho mọi pipeline
+    (Hán Việt/Phương ngữ/Từ mượn/Từ láy/Code-switching/filter), tránh lặp logic.
+
+    Thứ tự ưu tiên:
+      1. service_account_json (Vertex AI thật, chỉ áp dụng role="GEMINI").
+      2. env_file (mặc định: credentials_env_file(location), hoặc ".env" cạnh input_path) đọc
+         <ROLE>_API_KEY + base_url + model -> client OpenAI-compatible.
+    `model`/`base_url` truyền tay luôn thắng giá trị trong .env.
+    Trả về (client, model)."""
+    role = role.upper()
+    default_model = DEFAULT_GEMINI_MODEL if role == "GEMINI" else DEFAULT_OPENAI_MODEL
+
+    if role == "GEMINI" and service_account_json:
+        return load_gemini_client(service_account_json), (model or DEFAULT_GEMINI_MODEL)
+
+    if env_file:
+        env_path = Path(env_file)
+    elif location == "local":
+        env_path = env_paths.credentials_env_file(location)
+    elif input_path is not None:
+        env_path = Path(input_path).resolve().parent / ".env"
+    else:
+        env_path = env_paths.credentials_env_file(location)
+
+    env = load_env_file(env_path) if env_path.exists() else {}
+    role_env = env.get(role, {})
+    api_key = role_env.get("api_key")
+    resolved_base_url = base_url or role_env.get("base_url")
+    resolved_model = model or role_env.get("model") or default_model
+
+    if not (api_key and resolved_base_url):
+        raise ValueError(
+            f"Không tìm được {role}_API_KEY + base_url hợp lệ trong {env_path} (và role={role} "
+            f"không dùng service account) -- cần 1 trong 2 cách cấu hình credential."
+        )
+    return _make_openai_client(api_key, resolved_base_url), resolved_model
+
+
 def resolve_clients(args) -> tuple:
     """TỰ NHẬN DIỆN nguồn credential cho cả Gemini lẫn OpenAI, không cần biết trước đang chạy
     Colab hay local: ưu tiên --gemini-service-account-json (Vertex AI thật, --openai-api-key-file

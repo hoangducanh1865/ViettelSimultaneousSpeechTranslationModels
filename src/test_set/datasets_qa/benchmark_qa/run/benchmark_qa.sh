@@ -175,6 +175,18 @@ _cmd_prelude() {
     _INITIALIZED=1
 }
 
+# Chuẩn bị args credential cho 4 pipeline Gemini: GEMINI_COMMON (location/env-file/base-url) +
+# GEMINI_SA (service account nếu file tồn tại -- nếu không, pipeline dùng .env proxy).
+GEMINI_COMMON=()
+GEMINI_SA=()
+set_gemini_args() {
+    GEMINI_COMMON=(--location "$LOCATION" --env-file "$ENV_FILE")
+    [[ -n "$GEMINI_BASE_URL" ]] && GEMINI_COMMON+=(--gemini-base-url "$GEMINI_BASE_URL")
+    GEMINI_SA=()
+    [[ -f "$SERVICE_ACCOUNT_JSON" ]] && GEMINI_SA=(--service-account-json "$SERVICE_ACCOUNT_JSON")
+    return 0
+}
+
 # Gán KG_ARGS = (--knowledge-json <file>) nếu file tồn tại, ngược lại rỗng + cảnh báo.
 KG_ARGS=()
 set_kg_args() {
@@ -309,6 +321,7 @@ cmd_sound() {
     require_dir "$SOUND_SRC_DIR" "sound src"
     local sa
     sa="$(gemini_service_account_arg)"
+    [[ -n "$sa" || "${DRY_RUN}" == "1" ]] || die "sound cần service account Gemini (Vertex) tại ${SERVICE_ACCOUNT_JSON}."
 
     py "${SOUND_SRC_DIR}/clotho_aqa_pipeline.py" build-manifest --output-dir "$CLOTHO_AQA_DIR"
     py "${SOUND_SRC_DIR}/clotho_aqa_pipeline.py" filter-vn-relevance \
@@ -395,8 +408,7 @@ HAN_VIET_METADATA_COLS='{"tu": "Từ Hán Việt", "meaning": "Nghĩa", "categor
 cmd_han_viet() {
     _cmd_prelude "$@"
     local kg="${KNOWLEDGE_DIR}/knowledge_han_viet.json"
-    local sa
-    sa="$(gemini_service_account_arg)"
+    set_gemini_args
 
     # Bước 0: seed CSV + báo cáo độ phủ
     py "${HAN_VIET_SRC_DIR}/han_viet_seed_csv.py" --input "$HAN_VIET_INPUT_PATH" --out-csv "$HAN_VIET_SEED_CSV"
@@ -414,7 +426,7 @@ cmd_han_viet() {
 
     # Bước 1: phân loại mức độ
     py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" classify-levels \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$HAN_VIET_INPUT_PATH" \
         --output "$HAN_VIET_DIFFICULTY_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
@@ -440,7 +452,7 @@ cmd_han_viet() {
 
     # Bước 3: sinh câu hỏi + join field gốc
     py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" generate-questions \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$HAN_VIET_DIFFICULTY_OUTPUT" \
         --output "$HAN_VIET_MULTIHOP_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
@@ -458,19 +470,18 @@ cmd_han_viet() {
 cmd_phuong_ngu() {
     _cmd_prelude "$@"
     ensure_debate phuong_ngu
+    set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_phuong_ngu.json"
-    local sa
-    sa="$(gemini_service_account_arg)"
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
     py "${PHUONG_NGU_SRC_DIR}/phuong_ngu_pipeline.py" classify-region \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$PHUONG_NGU_INPUT_PATH" \
         --output "$PHUONG_NGU_REGION_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
     py "${PHUONG_NGU_SRC_DIR}/phuong_ngu_pipeline.py" generate-questions \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$PHUONG_NGU_REGION_OUTPUT" \
         --output "$PHUONG_NGU_QA_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
@@ -484,20 +495,19 @@ cmd_phuong_ngu() {
 cmd_tu_muon() {
     _cmd_prelude "$@"
     ensure_debate tu_muon
+    set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_muon.json"
-    local sa
-    sa="$(gemini_service_account_arg)"
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
     py "${TU_MUON_SRC_DIR}/tu_muon_pipeline.py" classify-levels \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --samples "$TU_MUON_SAMPLES_PATH" \
         --csv "$TU_MUON_CSV_PATH" \
         --output "$TU_MUON_DIFFICULTY_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
     py "${TU_MUON_SRC_DIR}/tu_muon_pipeline.py" generate-questions \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$TU_MUON_DIFFICULTY_OUTPUT" \
         --csv "$TU_MUON_CSV_PATH" \
         --output "$TU_MUON_MULTIHOP_OUTPUT" \
@@ -514,20 +524,19 @@ cmd_tu_lay_variant() {
     local variant="$1"
     tu_lay_variant_paths "$variant"
     ensure_debate tu_lay "$variant"
+    set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_lay_${variant}.json"
-    local sa
-    sa="$(gemini_service_account_arg)"
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
     py "${TU_LAY_SRC_DIR}/tu_lay_pipeline.py" classify-levels --variant "$variant" \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --samples "$TU_LAY_VARIANT_SAMPLES" \
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$TU_LAY_VARIANT_DIFFICULTY" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
     py "${TU_LAY_SRC_DIR}/tu_lay_pipeline.py" generate-questions --variant "$variant" \
-        --service-account-json "$sa" \
+        "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$TU_LAY_VARIANT_DIFFICULTY" \
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$TU_LAY_VARIANT_MULTIHOP" \
@@ -698,57 +707,59 @@ cmd_inspect() {
 cmd_local_preprocess() {
     _cmd_prelude "$@"
     require_var "TASK" "$TASK"
-    local base="${REPO_DIR}/stuff/benchmark_qa"
+    # Data root local (<repo>/data hoặc --qa-datasets-dir). Layout khớp các đường dẫn task dùng:
+    #   <root>/tu_muon/{tu_muon_tieng_viet_viet_hoa.csv -> _final.csv, asr_samples_with_tu_muon.json}
+    #   <root>/tu_lay/{tu_lay_toan_bo_va_van.csv, tu_lay_tieng_viet.csv -> *_final.csv, samples}
+    local base="${QA_DATASETS_DIR}"
     local pipeline="${HIEN_TUONG_SRC_DIR}/hien_tuong_filter_pipeline.py"
-    local vlsp_glob="asr_datasets/vlsp/*.json"
-    local ledger="asr_datasets/asr_source_ledger.json"
+    require_file "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" "release_hf_transcripts_by_dataset.json (corpus có audio)"
 
     case "$TASK" in
         tu-muon)
             py "$pipeline" filter-csv \
-                --src-csv "$base/tu_muon_tieng_viet_viet_hoa.csv" --word-col "Từ Tiếng Việt (Việt Hóa)" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
-                --out-csv "$base/tu_muon_tieng_viet_viet_hoa_final.csv"
+                --src-csv "$TU_MUON_INPUT_DIR/tu_muon_tieng_viet_viet_hoa.csv" --word-col "Từ Tiếng Việt (Việt Hóa)" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
+                --out-csv "$TU_MUON_CSV_PATH"
             py "$pipeline" build-samples \
-                --csv "$base/tu_muon_tieng_viet_viet_hoa_final.csv" --word-col "Từ Tiếng Việt (Việt Hóa)" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
+                --csv "$TU_MUON_CSV_PATH" --word-col "Từ Tiếng Việt (Việt Hóa)" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_muon_xuat_hien \
                 --metadata-cols '{"tu": "Từ Tiếng Việt (Việt Hóa)", "tu_goc": "Từ Gốc", "ngon_ngu_nguon_goc": "Ngôn Ngữ / Nguồn Gốc", "nhom_linh_vuc": "Nhóm Lĩnh Vực", "y_nghia_ghi_chu": "Ý Nghĩa / Ghi Chú"}' \
-                --out-json "$base/asr_datasets/asr_samples_with_tu_muon.json"
+                --out-json "$TU_MUON_SAMPLES_PATH"
             ;;
         tu-lay)
             py "$pipeline" filter-csv \
-                --src-csv "$base/tu_lay_toan_bo_va_van.csv" --word-col "Từ láy" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
-                --out-csv "$base/tu_lay_toan_bo_va_van_final.csv"
+                --src-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van.csv" --word-col "Từ láy" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
+                --out-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv"
             py "$pipeline" build-samples \
-                --csv "$base/tu_lay_toan_bo_va_van_final.csv" --word-col "Từ láy" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
+                --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --word-col "Từ láy" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_lay_xuat_hien \
                 --metadata-cols '{"tu": "Từ láy", "phan_loai": "Phân loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
-                --out-json "$base/asr_datasets/asr_samples_with_tu_lay_toan_bo_va_van.json"
+                --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json"
             py "$pipeline" split-by-prefix \
-                --csv "$base/tu_lay_toan_bo_va_van_final.csv" --column "Phân loại" --prefix "Láy toàn bộ" \
-                --out-csv-matched "$base/tu_lay_toan_bo_final.csv" --out-csv-rest "$base/tu_lay_van_final.csv" \
-                --samples "$base/asr_datasets/asr_samples_with_tu_lay_toan_bo_va_van.json" --word-col "Từ láy" \
+                --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --column "Phân loại" --prefix "Láy toàn bộ" \
+                --out-csv-matched "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_final.csv" --out-csv-rest "$TU_LAY_INPUT_DIR/tu_lay_van_final.csv" \
+                --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json" --word-col "Từ láy" \
                 --list-key tu_lay_xuat_hien --metadata-word-key tu \
-                --out-samples-matched "$base/asr_datasets/asr_samples_with_tu_lay_toan_bo.json" \
-                --out-samples-rest "$base/asr_datasets/asr_samples_with_tu_lay_van.json"
+                --out-samples-matched "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
+                --out-samples-rest "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json"
             py "$pipeline" filter-csv \
-                --src-csv "$base/tu_lay_tieng_viet.csv" --word-col "Từ láy" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
-                --out-csv "$base/tu_lay_tieng_viet_final.csv"
+                --src-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet.csv" --word-col "Từ láy" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
+                --out-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv"
             py "$pipeline" build-samples \
-                --csv "$base/tu_lay_tieng_viet_final.csv" --word-col "Từ láy" \
-                --vlsp-glob "$base/$vlsp_glob" --ledger "$base/$ledger" \
+                --csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv" --word-col "Từ láy" \
+                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_lay_xuat_hien \
                 --metadata-cols '{"tu": "Từ láy", "loai_tu_lay": "Loại từ láy", "tu_loai": "Từ loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
-                --out-json "$base/asr_datasets/asr_samples_with_tu_lay.json"
+                --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
             py "$pipeline" dedupe-samples \
-                --samples "$base/asr_datasets/asr_samples_with_tu_lay.json" --list-key tu_lay_xuat_hien --word-key tu \
-                --against "$base/asr_datasets/asr_samples_with_tu_lay_toan_bo.json" \
-                --against "$base/asr_datasets/asr_samples_with_tu_lay_van.json" \
-                --output "$base/asr_datasets/asr_samples_with_tu_lay.json"
+                --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json" --list-key tu_lay_xuat_hien --word-key tu \
+                --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
+                --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json" \
+                --output "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
             ;;
         *) die "--task phải là tu-muon hoặc tu-lay (nhận: $TASK)." ;;
     esac

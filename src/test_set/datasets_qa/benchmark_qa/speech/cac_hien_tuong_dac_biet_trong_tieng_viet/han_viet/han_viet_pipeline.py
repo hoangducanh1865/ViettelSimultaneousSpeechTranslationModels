@@ -56,6 +56,8 @@ _THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_THIS_DIR.parent))
 sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
+import auto_model_relay
+import env_paths
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
 
@@ -131,18 +133,12 @@ def _classify_level_batch(client, model, batch, max_retries):
     last_error = None
     for attempt in range(max_retries):
         try:
-            from google.genai import types
-
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=LEVEL_SYSTEM_PROMPT,
-                    temperature=0.0,
-                    max_output_tokens=4096,
-                ),
+            response = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=LEVEL_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
             )
-            raw = (response.text or "").strip()
+            raw = (response or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -283,18 +279,12 @@ def _gen_question_batch(client, model, batch, max_retries, system_prompt):
     last_error = None
     for attempt in range(max_retries):
         try:
-            from google.genai import types
-
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=0.7,
-                    max_output_tokens=8192,
-                ),
+            response = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
             )
-            raw = (response.text or "").strip()
+            raw = (response or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -510,21 +500,27 @@ def main(argv: Optional[list[str]] = None) -> None:
     p0.add_argument("--append-to", required=True, help="han_viet_difficulty_levels.jsonl (file --output của classify-levels -- ghi THÊM vào cuối).")
 
     p1 = sub.add_parser("classify-levels", help="Phân loại độ khó 1/2/3-hop cho từng sample.")
-    p1.add_argument("--service-account-json", required=True)
+    env_paths.add_location_arg(p1)
+    p1.add_argument("--service-account-json", default=None, help="Vertex AI (mặc định dùng .env nếu bỏ trống).")
+    p1.add_argument("--env-file", default=None, help='File .env credential (KEY="value" # base_url # model).')
+    p1.add_argument("--gemini-base-url", default=None)
     p1.add_argument("--input", required=True, help="han_viet_qa.jsonl (đã có field transcript).")
     p1.add_argument("--output", required=True, help="han_viet_difficulty_levels.jsonl")
-    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
-    p1.add_argument("--model", default=DEFAULT_MODEL)
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate -- optional.")
+    p1.add_argument("--model", default=None)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     p2 = sub.add_parser("generate-questions", help="Sinh N câu hỏi multi-hop cho mỗi sample (N=max_level).")
-    p2.add_argument("--service-account-json", required=True)
+    env_paths.add_location_arg(p2)
+    p2.add_argument("--service-account-json", default=None, help="Vertex AI (mặc định dùng .env nếu bỏ trống).")
+    p2.add_argument("--env-file", default=None, help='File .env credential (KEY="value" # base_url # model).')
+    p2.add_argument("--gemini-base-url", default=None)
     p2.add_argument("--input", required=True, help="han_viet_difficulty_levels.jsonl")
     p2.add_argument("--output", required=True, help="han_viet_multihop_qa.jsonl")
     p2.add_argument("--knowledge-json", default=None)
-    p2.add_argument("--model", default=DEFAULT_MODEL)
+    p2.add_argument("--model", default=None)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
@@ -545,12 +541,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         print(f"Đã ghi thêm {len(new_records)} record từ MỚI vào {args.append_to}.")
 
     elif args.command == "classify-levels":
-        client = load_gemini_client(args.service_account_json)
+        client, model = auto_model_relay.resolve_role_client(
+            "GEMINI", service_account_json=args.service_account_json, env_file=args.env_file,
+            location=args.location, model=args.model, base_url=args.gemini_base_url,
+        )
         records = _load_jsonl(Path(args.input))
         print(f"Đã đọc {len(records)} sample từ {args.input}")
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         leveled = classify_levels(
-            client, args.model, records, knowledge_graph=knowledge_graph,
+            client, model, records, knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -562,12 +561,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         print(f"Đã lưu {args.output}")
 
     elif args.command == "generate-questions":
-        client = load_gemini_client(args.service_account_json)
+        client, model = auto_model_relay.resolve_role_client(
+            "GEMINI", service_account_json=args.service_account_json, env_file=args.env_file,
+            location=args.location, model=args.model, base_url=args.gemini_base_url,
+        )
         leveled_records = _load_jsonl(Path(args.input))
         print(f"Đã đọc {len(leveled_records)} sample đã phân loại mức độ.")
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, leveled_records, Path(args.output), knowledge_graph=knowledge_graph,
+            client, model, leveled_records, Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 

@@ -58,8 +58,9 @@ cp src/test_set/datasets_qa/benchmark_qa/run/config.env.example \
 | `HF_WRITE_TOKEN` | khi push | Token tạo PR lên HuggingFace |
 | `LOCATION` | không (mặc định `drive`) | `drive` (Colab) hoặc `local` (máy bạn) |
 | `REPO_DIR` | không | Gốc repo (tự suy từ vị trí script) |
-| `QA_DATASETS_DIR` | không | Gốc dữ liệu QA (mặc định trên Drive) |
-| `SERVICE_ACCOUNT_JSON` | drive | Service account Gemini (Vertex AI) |
+| `QA_DATASETS_DIR` | không | Gốc dữ liệu QA: Drive, hoặc `<repo>/data` khi `LOCATION=local` |
+| `ENV_FILE` | không | File credential: `<drive>/voice_agent_for_edge_device/.env` (drive) / `<repo>/.env` (local) |
+| `SERVICE_ACCOUNT_JSON` | không | Service account Gemini (Vertex AI); bỏ trống thì dùng `ENV_FILE` proxy |
 | `KNOWLEDGE_DIR` | không | Nơi chứa `knowledge_<task>.json` |
 | `FULL_TRANSCRIPTS_JSON_PATH` | không | Corpus text rộng (bằng chứng coverage) |
 | `RELEASE_HF_TRANSCRIPTS_JSON_PATH` | không | Corpus **có audio** (tạo sample mới) |
@@ -302,11 +303,32 @@ Zero-shot voice cloning tiếng Việt (`hynt/ZipVoice-Vietnamese-2500h`, licens
 
 ---
 
-## 5. Ghi chú
+## 5. Test E2E local (real API)
 
-- `stuff/` và `noteboooks/` nằm trong `.gitignore` — **không bao giờ được push**. Tiền xử lý dùng
-  `vlsp/*.json` + `asr_source_ledger.json` chỉ chạy được ở local (dữ liệu không nằm trong git);
-  chạy bằng `bash run/benchmark_qa.sh local-preprocess --task tu-muon|tu-lay`.
-- Không commit token. `run/.env` và `.env` gốc repo đã bị ignore.
+Bộ test `tests/benchmark_qa/` chạy **thật** qua bash dispatcher với dữ liệu nhỏ (2-3 mẫu) ghi trong
+`data/_e2e/`, gồm cả tiền xử lý, cho cả 5 task (Code-switching có bước debate 2 API).
+
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+
+RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
+```
+
+- Cần `GEMINI_API_KEY` + `OPENAI_API_KEY` (kèm `# base_url # model`) trong `<repo>/.env`, proxy
+  phải đang chạy. Thiếu key → test tự `skip`.
+- Nếu proxy dùng tên model khác mặc định, override:
+  `E2E_GEMINI_MODEL=ag/gemini-3.x E2E_OPENAI_MODEL=cx/gpt-5.6-luna RUN_REAL_API=1 pytest ...`.
+
+---
+
+## 6. Ghi chú
+
+- **Local dùng `data/` làm data root** (thay cho `stuff/` cũ): `--location local` trỏ mọi đường dẫn
+  vào `<repo>/data/...`. `noteboooks/` vẫn bị gitignore.
+- Không commit token. `.env` (gốc repo, local) và `.env` trên Drive đều bị ignore.
+- `.env` dùng format `KEY="value" # base_url # model`; cả 4 task lẫn code-switching/filter đều đọc
+  credential qua `auto_model_relay.resolve_role_client()` (Vertex service account nếu có, ngược lại
+  dùng `.env` proxy).
 - `PYTHONPATH` được `run/_lib.sh` tự trỏ vào `<repo>/src` để import
   `test_set.datasets_qa.translate_datasets.translate_dataset`.

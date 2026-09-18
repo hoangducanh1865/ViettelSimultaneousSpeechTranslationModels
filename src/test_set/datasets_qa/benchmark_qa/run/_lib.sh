@@ -76,8 +76,14 @@ resolve_paths() {
     # PYTHONPATH trỏ vào src/ để `from test_set.datasets_qa...` import được.
     export PYTHONPATH="${SRC_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
 
-    # --- Dữ liệu trên Drive (mặc định) ---
-    : "${QA_DATASETS_DIR:=/content/drive/MyDrive/it/vdt/voice_agent_for_edge_device/datasets/public/qa_datasets}"
+    # --- Dữ liệu: drive dùng Drive, local dùng <repo>/data (KHÔNG còn stuff/) ---
+    if [[ "${LOCATION}" == "local" ]]; then
+        : "${QA_DATASETS_DIR:=${REPO_DIR}/data}"
+        : "${ENV_FILE:=${REPO_DIR}/.env}"
+    else
+        : "${QA_DATASETS_DIR:=/content/drive/MyDrive/it/vdt/voice_agent_for_edge_device/datasets/public/qa_datasets}"
+        : "${ENV_FILE:=/content/drive/MyDrive/it/vdt/voice_agent_for_edge_device/.env}"
+    fi
     : "${SERVICE_ACCOUNT_JSON:=/content/drive/MyDrive/it/vdt/voice_agent_for_edge_device/gemini_service_account.json}"
     : "${HF_SPEECH_REPO:=anhnbd2005/Vietnamese-Speech-QA}"
     : "${HF_SOUND_REPO:=anhnbd2005/Vietnamese-Audio-QA}"
@@ -86,14 +92,12 @@ resolve_paths() {
     : "${FULL_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/full_transcripts.json}"
     : "${RELEASE_HF_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/release_hf_transcripts_by_dataset.json}"
 
-    # --- Code-switching + knowledge dir phụ thuộc location (khớp env_paths.py) ---
-    if [[ "${LOCATION}" == "local" ]]; then
-        : "${CODE_SWITCHING_DIR:=${REPO_DIR}/stuff/benchmark_qa/speech/trich_xuat_thong_tin/code_switching}"
-        : "${KNOWLEDGE_DIR:=${CODE_SWITCHING_DIR}}"
-    else
-        : "${CODE_SWITCHING_DIR:=${QA_DATASETS_DIR}/benchmark_qa/speech/trich_xuat_thong_tin/code_switching}"
-        : "${KNOWLEDGE_DIR:=${QA_DATASETS_DIR}/benchmark_qa/knowledge}"
-    fi
+    # --- Code-switching + knowledge dir dùng CÙNG layout tương đối cho cả drive lẫn local ---
+    : "${CODE_SWITCHING_DIR:=${QA_DATASETS_DIR}/benchmark_qa/speech/trich_xuat_thong_tin/code_switching}"
+    : "${KNOWLEDGE_DIR:=${QA_DATASETS_DIR}/benchmark_qa/knowledge}"
+
+    # Export để env_paths.py (chạy trong process con) đọc được cùng override.
+    export QA_DATASETS_DIR CODE_SWITCHING_DIR KNOWLEDGE_DIR ENV_FILE
 
     # --- Sound ---
     CLOTHO_AQA_DIR="${QA_DATASETS_DIR}/sound_datasets/clotho_aqa"
@@ -235,14 +239,12 @@ require_var() {
     fi
 }
 
-# Lấy đường dẫn service account Gemini (chỉ cần khi --location drive).
+# Đường dẫn service account Gemini (tùy chọn): nếu không có, pipeline tự fallback sang .env proxy.
+# In ra stdout path nếu file tồn tại; rỗng nếu không (kèm cảnh báo ra stderr).
 gemini_service_account_arg() {
     if [[ ! -f "${SERVICE_ACCOUNT_JSON}" ]]; then
-        if [[ "${DRY_RUN}" == "1" ]]; then
-            warn "[dry-run] không thấy service account Gemini: ${SERVICE_ACCOUNT_JSON}"
-        else
-            die "Không thấy service account Gemini: ${SERVICE_ACCOUNT_JSON}"
-        fi
+        warn "không thấy service account Gemini (${SERVICE_ACCOUNT_JSON}) -- dùng .env: ${ENV_FILE}"
+        return 0
     fi
     printf '%s' "${SERVICE_ACCOUNT_JSON}"
 }

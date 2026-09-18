@@ -245,26 +245,17 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 
 def _resolve_role_client(service_account_json, env_file, model_arg, role: str, input_path,
-                         base_url_override: Optional[str] = None):
-    """Tự nhận diện nguồn credential cho 1 vai (GEMINI/OPENAI), giống code_switching_qa_pipeline:
-    ưu tiên service account (Vertex AI thật, chỉ cho GEMINI); nếu không, rơi về env-file (mặc định
-    ".env" cạnh --pre-final) đọc <role>_API_KEY/base_url/model. base_url_override thắng env."""
-    if role == "GEMINI" and service_account_json:
-        return auto_model_relay.load_gemini_client(service_account_json), (model_arg or DEFAULT_GEMINI_FILTER_MODEL)
-
-    env_path = Path(env_file) if env_file else Path(input_path).resolve().parent / ".env"
-    env = auto_model_relay.load_env_file(env_path) if env_path.exists() else {}
-    role_env = env.get(role, {})
-    api_key = role_env.get("api_key")
-    base_url = base_url_override or role_env.get("base_url")
-    default_model = DEFAULT_GEMINI_FILTER_MODEL if role == "GEMINI" else DEFAULT_OPENAI_FILTER_MODEL
-    model = model_arg or role_env.get("model") or default_model
-    if not (api_key and base_url):
-        raise ValueError(
-            f"Không có service account (role={role}), và không tìm được {role}_API_KEY + base_url "
-            f"hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình."
-        )
-    return auto_model_relay._make_openai_client(api_key, base_url), model
+                         location: str = "local", base_url_override: Optional[str] = None):
+    """Ủy quyền cho auto_model_relay.resolve_role_client() (nguồn DUY NHẤT xử lý credential)."""
+    return auto_model_relay.resolve_role_client(
+        role,
+        service_account_json=service_account_json,
+        env_file=env_file,
+        location=location,
+        model=model_arg,
+        base_url=base_url_override,
+        input_path=input_path,
+    )
 
 
 # =============================================================================================
@@ -303,7 +294,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                 str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not env_file else None
             )
             client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path,
-                                                 base_url_override=args.gemini_base_url)
+                                                 location=args.location, base_url_override=args.gemini_base_url)
         else:
             if args.openai_api_key_file:
                 client = auto_model_relay.load_openai_client(
@@ -311,7 +302,7 @@ def main(argv: Optional[list[str]] = None) -> None:
                 )
                 model = args.model or DEFAULT_OPENAI_FILTER_MODEL
             else:
-                client, model = _resolve_role_client(None, env_file, args.model, "OPENAI", input_path)
+                client, model = _resolve_role_client(None, env_file, args.model, "OPENAI", input_path, location=args.location)
 
         provider_call = make_provider_call(args.provider, client, model)
         system_prompt = build_filter_system_prompt(args.task)

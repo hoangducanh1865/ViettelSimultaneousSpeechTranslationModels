@@ -46,6 +46,8 @@ _THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_THIS_DIR.parent))
 sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
+import auto_model_relay
+import env_paths
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
 
@@ -174,8 +176,6 @@ def _random_strategy(weights: dict) -> str:
 
 
 def _llm_batch_call(client, model, items, max_retries):
-    from google.genai import types
-
     payload = [
         {"id": cid, "tu": tu, "aspect": ASPECT_LABELS[aspect], "correct": correct_text}
         for cid, tu, aspect, correct_text in items
@@ -183,16 +183,12 @@ def _llm_batch_call(client, model, items, max_retries):
     last_error = None
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=LLM_DISTRACTOR_SYSTEM_PROMPT,
-                    temperature=0.9,
-                    max_output_tokens=8192,
-                ),
+            response = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=LLM_DISTRACTOR_SYSTEM_PROMPT, temperature=0.9, max_output_tokens=8192,
             )
-            raw = (response.text or "").strip()
+            raw = (response or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = {item["id"]: item["distractors"] for item in json.loads(raw)}
             out = {}
@@ -294,8 +290,6 @@ thích thêm, không markdown fence.
 
 
 def _classify_level_batch_tu_muon(client, model, batch, max_retries):
-    from google.genai import types
-
     payload = [
         {"id": e["id"], "tu": e["tu"], "ngon_ngu": e["ngon_ngu"], "tu_goc": e["tu_goc"],
          "y_nghia": e["y_nghia"], "linh_vuc": e["linh_vuc"], "transcript": e["transcript"]}
@@ -305,14 +299,12 @@ def _classify_level_batch_tu_muon(client, model, batch, max_retries):
     last_error = None
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=LEVEL_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
-                ),
+            response = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=LEVEL_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
             )
-            raw = (response.text or "").strip()
+            raw = (response or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -409,8 +401,6 @@ def classify_levels(
 
 def _gen_level3_batch(client, model, batch, max_retries, system_prompt):
     # batch: list[(id_ghep, entry)]
-    from google.genai import types
-
     payload = [
         {"id": id_ghep, "tu": e["tu"], "transcript": e["transcript"], "historical_fact": e["historical_fact"]}
         for id_ghep, e in batch
@@ -419,14 +409,12 @@ def _gen_level3_batch(client, model, batch, max_retries, system_prompt):
     last_error = None
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
-                ),
+            response = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
             )
-            raw = (response.text or "").strip()
+            raw = (response or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -693,11 +681,14 @@ def main(argv: Optional[list[str]] = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("generate", help="[CŨ] Sinh câu hỏi flat 1-hop về từ mượn tiếng Việt (dùng classify-levels/generate-questions thay thế).")
-    p.add_argument("--service-account-json", required=True)
+    env_paths.add_location_arg(p)
+    p.add_argument("--service-account-json", default=None)
+    p.add_argument("--env-file", default=None)
+    p.add_argument("--gemini-base-url", default=None)
     p.add_argument("--samples", required=True, help="asr_samples_with_tu_muon.json")
     p.add_argument("--csv", required=True, help="tu_muon_tieng_viet_viet_hoa_final.csv")
     p.add_argument("--output", required=True, help="tu_muon_qa.jsonl (append, resumable)")
-    p.add_argument("--model", default=DEFAULT_MODEL)
+    p.add_argument("--model", default=None)
     p.add_argument("--rule-based-weight", type=float, default=0.5)
     p.add_argument("--llm-weight", type=float, default=0.5)
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -706,23 +697,29 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--seed", type=int, default=42)
 
     p1 = sub.add_parser("classify-levels", help="Phân loại độ khó 1/2/3-hop cho mỗi (sample, từ mượn).")
-    p1.add_argument("--service-account-json", required=True)
+    env_paths.add_location_arg(p1)
+    p1.add_argument("--service-account-json", default=None)
+    p1.add_argument("--env-file", default=None)
+    p1.add_argument("--gemini-base-url", default=None)
     p1.add_argument("--samples", required=True, help="asr_samples_with_tu_muon.json")
     p1.add_argument("--csv", required=True, help="tu_muon_tieng_viet_viet_hoa_final.csv")
     p1.add_argument("--output", required=True, help="tu_muon_difficulty_levels.jsonl")
-    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate (manual_model_relay.py) -- optional.")
-    p1.add_argument("--model", default=DEFAULT_MODEL)
+    p1.add_argument("--knowledge-json", default=None, help="Knowledge graph đã debate -- optional.")
+    p1.add_argument("--model", default=None)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     p2 = sub.add_parser("generate-questions", help="Sinh N câu hỏi multi-hop (N=max_level) cho mỗi (sample, từ mượn).")
-    p2.add_argument("--service-account-json", required=True)
+    env_paths.add_location_arg(p2)
+    p2.add_argument("--service-account-json", default=None)
+    p2.add_argument("--env-file", default=None)
+    p2.add_argument("--gemini-base-url", default=None)
     p2.add_argument("--input", required=True, help="tu_muon_difficulty_levels.jsonl")
     p2.add_argument("--csv", required=True, help="tu_muon_tieng_viet_viet_hoa_final.csv")
     p2.add_argument("--output", required=True, help="tu_muon_multihop_qa.jsonl")
     p2.add_argument("--knowledge-json", default=None)
-    p2.add_argument("--model", default=DEFAULT_MODEL)
+    p2.add_argument("--model", default=None)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
@@ -730,25 +727,31 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     args = parser.parse_args(argv)
 
+    def _resolve():
+        return auto_model_relay.resolve_role_client(
+            "GEMINI", service_account_json=args.service_account_json, env_file=args.env_file,
+            location=args.location, model=args.model, base_url=args.gemini_base_url,
+        )
+
     if args.command == "generate":
-        client = load_gemini_client(args.service_account_json)
+        client, model = _resolve()
         with open(args.samples, encoding="utf-8") as f:
             samples = json.load(f)
         print(f"Đã đọc {len(samples)} sample từ {args.samples}")
         generate(
-            client, args.model, samples, Path(args.csv), Path(args.output),
+            client, model, samples, Path(args.csv), Path(args.output),
             strategy_weights={"rule_based": args.rule_based_weight, "llm": args.llm_weight},
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries, seed=args.seed,
         )
 
     elif args.command == "classify-levels":
-        client = load_gemini_client(args.service_account_json)
+        client, model = _resolve()
         with open(args.samples, encoding="utf-8") as f:
             samples = json.load(f)
         print(f"Đã đọc {len(samples)} sample từ {args.samples}")
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         entries = classify_levels(
-            client, args.model, samples, Path(args.csv), knowledge_graph=knowledge_graph,
+            client, model, samples, Path(args.csv), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -760,13 +763,13 @@ def main(argv: Optional[list[str]] = None) -> None:
         print(f"Đã lưu {args.output}")
 
     elif args.command == "generate-questions":
-        client = load_gemini_client(args.service_account_json)
+        client, model = _resolve()
         with open(args.input, encoding="utf-8") as f:
             entries = [json.loads(line) for line in f if line.strip()]
         print(f"Đã đọc {len(entries)} entry đã phân loại mức độ.")
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, entries, Path(args.csv), Path(args.output), knowledge_graph=knowledge_graph,
+            client, model, entries, Path(args.csv), Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries, seed=args.seed,
         )
 
