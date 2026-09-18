@@ -52,7 +52,10 @@ from tqdm.auto import tqdm
 # code_switching/, còn translate_dataset.py ở 3 cấp trên (datasets_qa/) -- không tự nằm trên
 # sys.path khi Colab chạy `!python .../code_switching_pipeline.py` trực tiếp.
 sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+# env_paths.py sống ở thư mục ANH EM cac_hien_tuong_dac_biet_trong_tieng_viet/ (cùng cấp speech/).
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "cac_hien_tuong_dac_biet_trong_tieng_viet"))
 
+import env_paths  # noqa: E402
 from translate_dataset import DEFAULT_MODEL, load_gemini_client  # noqa: E402
 
 TASK_NAME = "code_switch_question_answering"
@@ -373,60 +376,81 @@ def main(argv: Optional[list[str]] = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p1 = sub.add_parser("build-manifest", help="Tải + xây manifest audio subset Code-switching (MMSU).")
-    p1.add_argument("--output-dir", required=True)
+    env_paths.add_location_arg(p1)
+    p1.add_argument("--output-dir", default=None, help="Mặc định: env_paths.code_switching_dir(--location).")
 
     p2 = sub.add_parser("build-vi-input", help="Join transcript thô (GigaSpeech2-vi) với audio thật.")
-    p2.add_argument("--transcripts", required=True)
+    env_paths.add_location_arg(p2)
+    p2.add_argument("--transcripts", default=None, help="Mặc định: {code_switching_dir}/giga_speech_test.jsonl.")
     p2.add_argument("--release-hf-json", required=True)
     p2.add_argument("--dataset-name", default="gigaspeech2_vi")
-    p2.add_argument("--output", required=True)
+    p2.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_vi_input.jsonl.")
 
     p3 = sub.add_parser("extract-terms", help="Gemini phát hiện từ code-switch THẬT trong transcript.")
-    p3.add_argument("--service-account-json", required=True)
-    p3.add_argument("--input", required=True)
-    p3.add_argument("--output", required=True)
+    env_paths.add_location_arg(p3)
+    p3.add_argument("--service-account-json", default=None, help="Mặc định: env_paths.gemini_service_account_path(--location) khi --location drive.")
+    p3.add_argument("--input", default=None, help="Mặc định: {code_switching_dir}/code_switching_vi_input.jsonl.")
+    p3.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_vi_terms.jsonl.")
     p3.add_argument("--model", default=DEFAULT_MODEL)
     p3.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p3.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p3.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     p4 = sub.add_parser("scan-dictionary", help="Quét cs_broad_new.txt trên giga_speech_test.jsonl (khớp token chính xác).")
-    p4.add_argument("--dictionary", required=True)
-    p4.add_argument("--transcripts", required=True)
-    p4.add_argument("--output", required=True)
+    env_paths.add_location_arg(p4)
+    p4.add_argument("--dictionary", default=None, help="Mặc định: {code_switching_dir}/cs_broad_new.txt.")
+    p4.add_argument("--transcripts", default=None, help="Mặc định: {code_switching_dir}/giga_speech_test.jsonl.")
+    p4.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/giga_speech_scanned.jsonl.")
 
     p5 = sub.add_parser("merge-datasets", help="Hợp nhất GigaSpeech (đã quét) + ViMed_Hard + ViMed thành code_switching_qa.jsonl.")
-    p5.add_argument("--giga-scanned", required=True)
-    p5.add_argument("--vimed-hard", required=True)
-    p5.add_argument("--vimed-normal", required=True)
-    p5.add_argument("--output", required=True)
+    env_paths.add_location_arg(p5)
+    p5.add_argument("--giga-scanned", default=None, help="Mặc định: {code_switching_dir}/giga_speech_scanned.jsonl.")
+    p5.add_argument("--vimed-hard", default=None, help="Mặc định: {code_switching_dir}/vimed_css_test_hard.jsonl.")
+    p5.add_argument("--vimed-normal", default=None, help="Mặc định: {code_switching_dir}/vimed_css_test.jsonl.")
+    p5.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_qa.jsonl.")
 
     args = parser.parse_args(argv)
 
     if args.command == "build-manifest":
-        build_manifest(Path(args.output_dir))
+        cs_dir = env_paths.code_switching_dir(args.location)
+        output_dir = Path(args.output_dir) if args.output_dir else cs_dir
+        build_manifest(output_dir)
 
     elif args.command == "build-vi-input":
-        build_vi_input(
-            Path(args.transcripts), Path(args.release_hf_json), Path(args.output),
-            dataset_name=args.dataset_name,
-        )
+        cs_dir = env_paths.code_switching_dir(args.location)
+        transcripts = Path(args.transcripts) if args.transcripts else cs_dir / "giga_speech_test.jsonl"
+        output = Path(args.output) if args.output else cs_dir / "code_switching_vi_input.jsonl"
+        build_vi_input(transcripts, Path(args.release_hf_json), output, dataset_name=args.dataset_name)
 
     elif args.command == "extract-terms":
-        client = load_gemini_client(args.service_account_json)
-        records = _load_jsonl(Path(args.input))
+        cs_dir = env_paths.code_switching_dir(args.location)
+        service_account_json = args.service_account_json or (
+            str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" else None
+        )
+        assert service_account_json, "--service-account-json bắt buộc khi --location local (không có Vertex service account cho local)."
+        input_path = Path(args.input) if args.input else cs_dir / "code_switching_vi_input.jsonl"
+        output = Path(args.output) if args.output else cs_dir / "code_switching_vi_terms.jsonl"
+        client = load_gemini_client(service_account_json)
+        records = _load_jsonl(input_path)
         extract_terms(
-            client, args.model, records, Path(args.output),
+            client, args.model, records, output,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 
     elif args.command == "scan-dictionary":
-        scan_dictionary(Path(args.dictionary), Path(args.transcripts), Path(args.output))
+        cs_dir = env_paths.code_switching_dir(args.location)
+        dictionary = Path(args.dictionary) if args.dictionary else cs_dir / "cs_broad_new.txt"
+        transcripts = Path(args.transcripts) if args.transcripts else cs_dir / "giga_speech_test.jsonl"
+        output = Path(args.output) if args.output else cs_dir / "giga_speech_scanned.jsonl"
+        scan_dictionary(dictionary, transcripts, output)
 
     elif args.command == "merge-datasets":
-        merge_datasets(
-            Path(args.giga_scanned), Path(args.vimed_hard), Path(args.vimed_normal), Path(args.output),
-        )
+        cs_dir = env_paths.code_switching_dir(args.location)
+        giga_scanned = Path(args.giga_scanned) if args.giga_scanned else cs_dir / "giga_speech_scanned.jsonl"
+        vimed_hard = Path(args.vimed_hard) if args.vimed_hard else cs_dir / "vimed_css_test_hard.jsonl"
+        vimed_normal = Path(args.vimed_normal) if args.vimed_normal else cs_dir / "vimed_css_test.jsonl"
+        output = Path(args.output) if args.output else cs_dir / "code_switching_qa.jsonl"
+        merge_datasets(giga_scanned, vimed_hard, vimed_normal, output)
 
 
 if __name__ == "__main__":

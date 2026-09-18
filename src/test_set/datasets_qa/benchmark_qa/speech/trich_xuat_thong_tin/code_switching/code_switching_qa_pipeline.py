@@ -60,6 +60,7 @@ sys.path.insert(0, str(_THIS_DIR.parents[1] / "cac_hien_tuong_dac_biet_trong_tie
 sys.path.insert(0, str(_THIS_DIR.parents[3]))  # datasets_qa/, cho translate_dataset
 
 import auto_model_relay  # noqa: E402 -- dùng chung call_model()/resolve_clients() cho auto-detect Colab/local
+import env_paths  # noqa: E402
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index  # noqa: E402
 from translate_dataset import DEFAULT_MODEL  # noqa: E402
 
@@ -575,22 +576,24 @@ def main(argv: Optional[list[str]] = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p1 = sub.add_parser("classify-cs", help="Gắn field debate (hoặc Gemini fallback) cho từng (sample, thuật ngữ).")
-    p1.add_argument("--service-account-json", default=None, help="Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
-    p1.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input).')
-    p1.add_argument("--input", required=True)
-    p1.add_argument("--knowledge-json", default=None)
-    p1.add_argument("--output", required=True)
+    env_paths.add_location_arg(p1)
+    p1.add_argument("--service-account-json", default=None, help="Mặc định: env_paths.gemini_service_account_path(--location) khi --location drive; bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p1.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: env_paths.default_env_file(--location) khi --location local).')
+    p1.add_argument("--input", default=None, help="Mặc định: {code_switching_dir}/code_switching_qa_has_terms.jsonl.")
+    p1.add_argument("--knowledge-json", default=None, help="Mặc định: {knowledge_dir}/knowledge_code_switching.json.")
+    p1.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_classified.jsonl.")
     p1.add_argument("--model", default=None)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     p2 = sub.add_parser("generate-questions", help="Sinh câu hỏi 6 loại (A-F) từ output classify-cs.")
-    p2.add_argument("--service-account-json", default=None, help="Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
-    p2.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input).')
-    p2.add_argument("--input", required=True)
-    p2.add_argument("--knowledge-json", default=None)
-    p2.add_argument("--output", required=True)
+    env_paths.add_location_arg(p2)
+    p2.add_argument("--service-account-json", default=None, help="Mặc định: env_paths.gemini_service_account_path(--location) khi --location drive; bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p2.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: env_paths.default_env_file(--location) khi --location local).')
+    p2.add_argument("--input", default=None, help="Mặc định: {code_switching_dir}/code_switching_classified.jsonl.")
+    p2.add_argument("--knowledge-json", default=None, help="Mặc định: {knowledge_dir}/knowledge_code_switching.json.")
+    p2.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_multihop_qa.jsonl.")
     p2.add_argument("--model", default=None)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
@@ -598,12 +601,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--seed", type=int, default=42)
 
     p3 = sub.add_parser("filter-questions", help="Lọc chất lượng câu hỏi (dùng chung Gemini/OpenAI).")
+    env_paths.add_location_arg(p3)
     p3.add_argument("--provider", required=True, choices=["gemini", "openai"])
-    p3.add_argument("--input", required=True)
-    p3.add_argument("--kept-output", required=True)
-    p3.add_argument("--rules-output", required=True)
-    p3.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input) -- dùng khi thiếu --service-account-json/--openai-api-key-file.')
-    p3.add_argument("--service-account-json", default=None, help="Vertex AI (--provider gemini). Bỏ trống để lấy GEMINI_API_KEY từ --env-file.")
+    p3.add_argument("--input", default=None, help="Mặc định: {code_switching_dir}/code_switching_multihop_qa.jsonl (provider gemini) hoặc {code_switching_dir}/code_switching_gemini_kept.jsonl (provider openai).")
+    p3.add_argument("--kept-output", default=None, help="Mặc định: {code_switching_dir}/code_switching_<provider>_kept.jsonl.")
+    p3.add_argument("--rules-output", default=None, help="Mặc định: {code_switching_dir}/code_switching_<provider>_rules.json.")
+    p3.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: env_paths.default_env_file(--location) khi --location local) -- dùng khi thiếu --service-account-json/--openai-api-key-file.')
+    p3.add_argument("--service-account-json", default=None, help="Vertex AI (--provider gemini). Mặc định: env_paths.gemini_service_account_path(--location) khi --location drive; bỏ trống để lấy GEMINI_API_KEY từ --env-file.")
     p3.add_argument("--gemini-model", default=None)
     p3.add_argument("--openai-api-key-file", default=None, help="File key OpenAI-compatible (--provider openai). Bỏ trống để lấy OPENAI_API_KEY từ --env-file.")
     p3.add_argument("--openai-base-url", default=None)
@@ -615,43 +619,71 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     if args.command == "classify-cs":
-        client, model = _resolve_role_client(args.service_account_json, args.env_file, args.model, "GEMINI", args.input)
-        records = _load_jsonl(Path(args.input))
-        kg = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
+        cs_dir = env_paths.code_switching_dir(args.location)
+        service_account_json = args.service_account_json or (
+            str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not args.env_file else None
+        )
+        env_file = args.env_file or (str(env_paths.default_env_file(args.location)) if args.location == "local" else None)
+        input_path = Path(args.input) if args.input else cs_dir / "code_switching_qa_has_terms.jsonl"
+        knowledge_json = args.knowledge_json or str(env_paths.knowledge_dir(args.location) / "knowledge_code_switching.json")
+        output = Path(args.output) if args.output else cs_dir / "code_switching_classified.jsonl"
+
+        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path)
+        records = _load_jsonl(input_path)
+        kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         out = classify_cs(
             client, model, records, kg,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
-        with open(args.output, "w", encoding="utf-8") as f:
+        with open(output, "w", encoding="utf-8") as f:
             for r in out:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        print(f"Đã ghi {len(out)} sample đã classify vào {args.output}")
+        print(f"Đã ghi {len(out)} sample đã classify vào {output}")
 
     elif args.command == "generate-questions":
-        client, model = _resolve_role_client(args.service_account_json, args.env_file, args.model, "GEMINI", args.input)
-        records = _load_jsonl(Path(args.input))
-        kg = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
+        cs_dir = env_paths.code_switching_dir(args.location)
+        service_account_json = args.service_account_json or (
+            str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not args.env_file else None
+        )
+        env_file = args.env_file or (str(env_paths.default_env_file(args.location)) if args.location == "local" else None)
+        input_path = Path(args.input) if args.input else cs_dir / "code_switching_classified.jsonl"
+        knowledge_json = args.knowledge_json or str(env_paths.knowledge_dir(args.location) / "knowledge_code_switching.json")
+        output = Path(args.output) if args.output else cs_dir / "code_switching_multihop_qa.jsonl"
+
+        client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path)
+        records = _load_jsonl(input_path)
+        kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         generate_questions(
-            client, model, records, Path(args.output), knowledge_graph=kg,
+            client, model, records, output, knowledge_graph=kg,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
             seed=args.seed,
         )
 
     elif args.command == "filter-questions":
-        records = _load_jsonl(Path(args.input))
+        cs_dir = env_paths.code_switching_dir(args.location)
+        default_input = cs_dir / "code_switching_multihop_qa.jsonl" if args.provider == "gemini" else cs_dir / "code_switching_gemini_kept.jsonl"
+        input_path = Path(args.input) if args.input else default_input
+        kept_output = Path(args.kept_output) if args.kept_output else cs_dir / f"code_switching_{args.provider}_kept.jsonl"
+        rules_output = Path(args.rules_output) if args.rules_output else cs_dir / f"code_switching_{args.provider}_rules.json"
+        env_file = args.env_file or (str(env_paths.default_env_file(args.location)) if args.location == "local" else None)
+
+        records = _load_jsonl(input_path)
         if args.provider == "gemini":
-            client, model = _resolve_role_client(args.service_account_json, args.env_file, args.gemini_model, "GEMINI", args.input)
+            service_account_json = args.service_account_json or (
+                str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not env_file else None
+            )
+            client, model = _resolve_role_client(service_account_json, env_file, args.gemini_model, "GEMINI", input_path)
             provider_call = make_gemini_provider_call(client, model)
         else:
             if args.openai_api_key_file:
                 openai_client = auto_model_relay.load_openai_client(Path(args.openai_api_key_file), args.openai_base_url or auto_model_relay.DEFAULT_OPENAI_BASE_URL)
                 openai_model = args.openai_model or auto_model_relay.DEFAULT_OPENAI_MODEL
             else:
-                openai_client, openai_model = _resolve_role_client(None, args.env_file, args.openai_model, "OPENAI", args.input)
+                openai_client, openai_model = _resolve_role_client(None, env_file, args.openai_model, "OPENAI", input_path)
             provider_call = make_openai_provider_call(openai_client, openai_model)
 
         filter_questions(
-            provider_call, records, Path(args.kept_output), Path(args.rules_output),
+            provider_call, records, kept_output, rules_output,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
 

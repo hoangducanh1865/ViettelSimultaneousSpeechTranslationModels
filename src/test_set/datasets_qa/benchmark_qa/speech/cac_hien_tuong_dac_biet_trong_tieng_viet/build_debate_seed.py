@@ -28,6 +28,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
+import env_paths
 from knowledge_graph import SCHEMA_VERSION
 
 SCHEMA_TEXT = """{
@@ -233,10 +234,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--web-candidates-json", default=None, help='JSON list [{"word": str, "note": str}, ...].')
     parser.add_argument("--coverage-report", default=None, help="Output của hien_tuong_filter_pipeline.py word-coverage-report.")
     parser.add_argument("--unmatched-transcripts-sample", default=None, help="JSON list[str] transcript chưa khớp từ nào.")
-    parser.add_argument("--samples-jsonl", default=None, help="NHÁNH THAY THẾ (vd Code-switching): JSONL có id/text/cs_terms -- sinh candidate_units theo SAMPLE thay vì candidate_words theo TỪ, bỏ qua mọi tham số CSV/web/coverage ở trên.")
+    parser.add_argument("--samples-jsonl", default=None, help="NHÁNH THAY THẾ (vd Code-switching): JSONL có id/text/cs_terms -- sinh candidate_units theo SAMPLE thay vì candidate_words theo TỪ, bỏ qua mọi tham số CSV/web/coverage ở trên. Mặc định (khi --task code_switching): {code_switching_dir}/code_switching_qa_has_terms.jsonl.")
     parser.add_argument("--extra-instructions", default="")
     parser.add_argument("--max-unmatched-sample", type=int, default=300)
-    parser.add_argument("--out-json", required=True)
+    env_paths.add_location_arg(parser)
+    parser.add_argument("--out-json", default=None, help="Mặc định (khi --task code_switching): {code_switching_dir}/debate_seed_code_switching.json.")
     args = parser.parse_args(argv)
 
     coverage_report = None
@@ -249,16 +251,25 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.unmatched_transcripts_sample, encoding="utf-8") as f:
             unmatched = json.load(f)
 
+    samples_jsonl = Path(args.samples_jsonl) if args.samples_jsonl else None
+    out_json = Path(args.out_json) if args.out_json else None
+    if args.task == "code_switching":
+        cs_dir = env_paths.code_switching_dir(args.location)
+        samples_jsonl = samples_jsonl or cs_dir / "code_switching_qa_has_terms.jsonl"
+        out_json = out_json or cs_dir / "debate_seed_code_switching.json"
+    assert out_json is not None, "--out-json bắt buộc (trừ khi --task code_switching, đã có mặc định)."
+
     seed = build_seed(
         args.task, variant=args.variant,
         candidate_csv=Path(args.candidate_csv) if args.candidate_csv else None, word_col=args.word_col,
         web_candidates_json=Path(args.web_candidates_json) if args.web_candidates_json else None,
         coverage_report=coverage_report, unmatched_sample_transcripts=unmatched,
-        samples_jsonl=Path(args.samples_jsonl) if args.samples_jsonl else None,
+        samples_jsonl=samples_jsonl,
         extra_instructions=args.extra_instructions, max_unmatched_sample=args.max_unmatched_sample,
     )
-    with open(args.out_json, "w", encoding="utf-8") as f:
+    with open(out_json, "w", encoding="utf-8") as f:
         json.dump(seed, f, ensure_ascii=False, indent=2)
+    args.out_json = str(out_json)
 
     if "candidate_units" in seed:
         print(f"Đã lưu {args.out_json} ({len(seed['candidate_units'])} sample có cs_terms).")
