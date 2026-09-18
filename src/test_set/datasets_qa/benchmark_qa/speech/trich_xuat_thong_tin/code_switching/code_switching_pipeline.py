@@ -330,20 +330,23 @@ _DATASET_SOURCE_TEXT_FIELD = {
 }
 
 
-def merge_datasets(giga_scanned_path: Path, vimed_hard_path: Path, vimed_normal_path: Path, output_path: Path) -> None:
+def merge_datasets(giga_scanned_path: Path, vimed_hard_path: Path, vimed_normal_path: Path, output_path: Path) -> Path:
     """Hợp nhất 3 nguồn thành code_switching_qa.jsonl. MỖI record GIỮ NGUYÊN VẸN toàn bộ field
     gốc (không xóa field nào -- để truy vết ngược lại data gốc) + THÊM 2 field chuẩn hóa đồng
     nhất giữa mọi nguồn ("text", "cs_terms") + "dataset_source". Đường dẫn audio
     ("audio_filepath" ở GigaSpeech, "audio" ở ViMed) giữ NGUYÊN key + value gốc -- KHÔNG đổi tên,
-    KHÔNG parse lại."""
+    KHÔNG parse lại. Ghi THÊM 1 file "_has_terms" (chỉ record có >=1 cs_terms) làm input trực
+    tiếp cho classify-cs -- gộp bước lọc từng phải làm tay trong notebook vào đây, trả về path
+    file đó để caller (CLI) in ra cho người dùng biết."""
     sources = [
         ("GigaSpeech", giga_scanned_path),
         ("ViMed_Hard", vimed_hard_path),
         ("ViMed", vimed_normal_path),
     ]
 
-    n_written = 0
-    with open(output_path, "w", encoding="utf-8") as out_f:
+    has_terms_path = output_path.with_name(f"{output_path.stem}_has_terms{output_path.suffix}")
+    n_written = n_has_terms = 0
+    with open(output_path, "w", encoding="utf-8") as out_f, open(has_terms_path, "w", encoding="utf-8") as has_terms_f:
         for dataset_source, path in sources:
             text_field = _DATASET_SOURCE_TEXT_FIELD[dataset_source]
             with open(path, encoding="utf-8") as f:
@@ -356,10 +359,16 @@ def merge_datasets(giga_scanned_path: Path, vimed_hard_path: Path, vimed_normal_
                     record["text"] = r[text_field]
                     record["cs_terms"] = r.get("cs_terms") or []
                     record["dataset_source"] = dataset_source
-                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    line_out = json.dumps(record, ensure_ascii=False) + "\n"
+                    out_f.write(line_out)
                     n_written += 1
+                    if record["cs_terms"]:
+                        has_terms_f.write(line_out)
+                        n_has_terms += 1
 
     print(f"Đã hợp nhất {n_written} sample từ 3 nguồn (GigaSpeech + ViMed_Hard + ViMed) vào {output_path}")
+    print(f"Đã lọc {n_has_terms}/{n_written} sample có >=1 cs_terms vào {has_terms_path}")
+    return has_terms_path
 
 
 # ============================================================================================
