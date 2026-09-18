@@ -67,6 +67,12 @@ DEFAULT_OPENAI_BASE_URL = "https://r3wrrfi.abc-tunnel.us/v1"
 
 _CONSENSUS_MARKER_RE = re.compile(r"CONSENSUS:\s*(FINAL|CONTINUE)", re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"```json\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+# response quá dài đôi khi bị model BỎ QUÊN fence đóng "```" cuối (không phải bị cắt cụt bởi
+# max_output_tokens -- response vẫn ngắn hơn nhiều so với giới hạn) -- 2 regex này chỉ bóc fence
+# MỞ (có hoặc không có "json" theo sau) để dùng làm fallback khi _JSON_FENCE_RE (đòi cả 2 fence)
+# không match được gì.
+_LEADING_FENCE_RE = re.compile(r"^```(?:json)?\s*", re.IGNORECASE)
+_TRAILING_FENCE_RE = re.compile(r"```\s*$")
 
 
 @dataclass
@@ -113,13 +119,26 @@ def _repair_invalid_single_quote_escape(text: str) -> str:
     return text.replace("\\'", "'")
 
 
+def _strip_open_fence(text: str) -> str:
+    """Bóc fence MỞ "```json"/"```" ở đầu (nếu có) và fence ĐÓNG ở cuối (nếu có) -- KHÔNG đòi
+    phải có ĐỦ CẢ HAI như _JSON_FENCE_RE. Dùng làm fallback cho trường hợp model MỞ fence nhưng
+    quên đóng (response vẫn đủ dài/đầy đủ nội dung JSON, chỉ thiếu 3 ký tự "```" cuối cùng --
+    raw_decode() bên dưới vẫn parse đúng vì JSON tự nó có cặp {}/[] cân bằng, không cần fence)."""
+    text = text.strip()
+    text = _LEADING_FENCE_RE.sub("", text, count=1)
+    text = _TRAILING_FENCE_RE.sub("", text, count=1)
+    return text.strip()
+
+
 def extract_knowledge_json(response_text: str) -> Optional[dict]:
     """Lấy khối ```json ... ``` CUỐI CÙNG trong response (nếu model lỡ in ra nhiều khối, khối
-    cuối luôn là bản họ muốn giữ lại). Nếu KHÔNG có khối fence nào (model quên bọc fence), thử
-    parse TOÀN BỘ response_text -- cả 2 nhánh đều dùng raw_decode (khoan dung với text thừa phía
-    sau JSON) rồi mới thử lại sau khi sửa escape "\\'" sai nếu lần đầu vẫn fail."""
+    cuối luôn là bản họ muốn giữ lại). Nếu regex đòi CẢ 2 fence không match được (model quên fence
+    đóng, hoặc không có fence nào cả), fallback sang bóc fence MỞ một mình (hoặc không bóc gì nếu
+    không có), rồi mới đến response gốc y nguyên -- mỗi candidate đều thử raw_decode() (khoan
+    dung text thừa phía sau) VÀ thử lại sau khi sửa escape "\\'" sai nếu lần đầu vẫn fail."""
     matches = _JSON_FENCE_RE.findall(response_text)
     candidates = [matches[-1].strip()] if matches else []
+    candidates.append(_strip_open_fence(response_text))
     candidates.append(response_text.strip())
 
     for candidate in candidates:
@@ -137,21 +156,37 @@ def extract_consensus_vote(response_text: str) -> Optional[str]:
 
 
 def describe_json_error(response_text: str) -> str:
-    """Tái hiện ĐÚNG logic extract_knowledge_json() để lấy lại text đã thử parse, rồi báo chính
-    xác json.JSONDecodeError xảy ra ở đâu (dòng/cột) kèm đoạn text quanh đó -- head/tail 300 ký
-    tự không đủ để thấy lỗi cú pháp nằm GIỮA 1 response dài hàng nghìn ký tự."""
+    """Tái hiện ĐÚNG logic extract_knowledge_json() (kể cả các fallback bóc fence mở/sửa escape
+    "\\'") để báo LỖI CUỐI CÙNG THẬT SỰ khiến TẤT CẢ candidate đều fail -- dùng candidate cuối
+    cùng (đầy đủ nội dung nhất, sau khi đã bóc mọi fence có thể) để dòng/cột báo ra khớp với
+    những gì người đọc thấy trong response gốc."""
     matches = _JSON_FENCE_RE.findall(response_text)
-    candidate = matches[-1].strip() if matches else response_text.strip()
-    try:
-        json.loads(candidate)
-        return "Parse lại thành công (?) -- không tái hiện được lỗi."
-    except json.JSONDecodeError as e:
-        start = max(0, e.pos - 150)
-        end = min(len(candidate), e.pos + 150)
-        return (
-            f"JSONDecodeError: {e.msg} tại dòng {e.lineno}, cột {e.colno} (ký tự thứ {e.pos}/{len(candidate)}).\n"
-            f"    --- 150 ký tự TRƯỚC/SAU vị trí lỗi ---\n{candidate[start:end]!r}"
-        )
+    candidates = [matches[-1].strip()] if matches else []
+    candidates.append(_strip_open_fence(response_text))
+    candidates.append(response_text.strip())
+
+    # Ghi nhận lỗi có e.pos LỚN NHẤT (candidate/lượt sửa nào parse được XA NHẤT trước khi gãy) --
+    # KHÔNG phải lỗi cuối cùng thử được, vì các candidate sau (ví dụ response gốc còn nguyên cả
+    # dấu fence "```") luôn fail ngay tại ký tự 0, che mất lỗi thật sự nằm sâu hơn ở candidate
+    # đã bóc fence.
+    best_error = None
+    best_candidate = candidates[-1] if candidates else response_text
+    for candidate in candidates:
+        for text in (candidate, _repair_invalid_single_quote_escape(candidate)):
+            try:
+                json.loads(text)
+                return "Parse lại thành công (?) -- không tái hiện được lỗi."
+            except json.JSONDecodeError as e:
+                if best_error is None or e.pos > best_error.pos:
+                    best_error, best_candidate = e, text
+
+    start = max(0, best_error.pos - 150)
+    end = min(len(best_candidate), best_error.pos + 150)
+    return (
+        f"JSONDecodeError: {best_error.msg} tại dòng {best_error.lineno}, cột {best_error.colno} "
+        f"(ký tự thứ {best_error.pos}/{len(best_candidate)}).\n"
+        f"    --- 150 ký tự TRƯỚC/SAU vị trí lỗi ---\n{best_candidate[start:end]!r}"
+    )
 
 
 def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: RelayState, model: str) -> str:
