@@ -70,9 +70,11 @@ from typing import Callable, Optional
 
 from tqdm.auto import tqdm
 
+import env_paths
 from knowledge_graph import SCHEMA_VERSION
 
 DEFAULT_MODEL_ORDER = ["gemini", "openai"]
+DEFAULT_MANUAL_MODEL_ORDER = ["gemini", "chatgpt", "claude"]
 DEFAULT_MAX_ROUNDS = 5
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview"
@@ -399,21 +401,72 @@ def _write_turn_log(log_dir: Path, turn: Turn) -> None:
         json.dump(_turn_to_dict(turn), f, ensure_ascii=False, indent=2)
 
 
+_SKIP_SENTINEL = "SKIP"
+
+
+def manual_turn_io(
+    prompt: str, *, prompt_path: Path, response_path: Path,
+    input_fn: Callable[[str], str] = input, print_fn: Callable[[str], None] = print,
+) -> str:
+    """Khôi phục cơ chế copy-paste thủ công (manual_model_relay.py cũ, đã bị thay bằng API):
+    ghi prompt vào prompt_path (KHÔNG in ra terminal -- có thể dài hàng chục KB), xoá
+    response_path CŨ (tránh đọc nhầm câu trả lời của lượt trước), hỏi xác nhận NGẮN qua
+    input_fn() (Enter khi đã dán xong, gõ SKIP để bỏ lượt nếu paste hỏng), rồi đọc response_path.
+    Trả về "" nếu SKIP -- run_turn() coi đây như 1 lượt lỗi thông thường (parsed_knowledge=None,
+    relay vẫn tiếp tục), không phải lỗi hệ thống."""
+    prompt_path.write_text(prompt, encoding="utf-8")
+    if response_path.exists():
+        response_path.unlink()
+
+    print_fn(f"\n>>> Mở {prompt_path}, copy TOÀN BỘ nội dung, dán vào model (web).")
+    print_fn(f">>> Dán câu trả lời của model vào {response_path} rồi lưu file lại.")
+
+    while True:
+        answer = input_fn(f"Đã dán xong câu trả lời vào {response_path.name}? (Enter để đọc tiếp, gõ {_SKIP_SENTINEL} để bỏ qua lượt này): ")
+        if answer.strip().upper() == _SKIP_SENTINEL:
+            return ""
+        if not response_path.exists() or not response_path.read_text(encoding="utf-8").strip():
+            print_fn(f"[LỖI] {response_path} vẫn trống -- dán câu trả lời vào file rồi Enter lại, hoặc gõ {_SKIP_SENTINEL}.")
+            continue
+        return response_path.read_text(encoding="utf-8")
+
+
 def run_turn(
     task: str, variant: Optional[str], seed: dict, state: RelayState, model: str, *,
+    debate_mode: str = "api",
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    prompt_path: Optional[Path] = None, response_path: Optional[Path] = None,
+    input_fn: Callable[[str], str] = input,
     log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print,
 ) -> Turn:
-    """Soạn prompt rồi gọi API NGAY để lấy response -- không còn bước ghi file/chờ người dán.
-    Retry (kèm backoff) khi lỗi gọi API hoặc response không parse được JSON hợp lệ; sau
-    max_retries lần thất bại, ghi nhận 1 turn "trắng" (parsed_knowledge=None) và relay tiếp tục
-    (không dừng cả relay vì 1 lượt lỗi)."""
+    """debate_mode="api" (mặc định): soạn prompt rồi gọi API NGAY để lấy response -- không cần
+    người dán tay. debate_mode="manual": soạn prompt rồi ghi ra prompt_path/response_path, chờ
+    người copy-paste thủ công qua manual_turn_io() (KHÔNG retry API, KHÔNG cần max_retries> 1 --
+    người dùng tự sửa/dán lại nếu JSON hỏng, vòng while trong manual_turn_io() đã xử lý việc đó).
+    Retry (kèm backoff, CHỈ áp dụng debate_mode="api") khi lỗi gọi API hoặc response không parse
+    được JSON hợp lệ; sau max_retries lần thất bại, ghi nhận 1 turn "trắng"
+    (parsed_knowledge=None) và relay tiếp tục (không dừng cả relay vì 1 lượt lỗi)."""
     prompt = build_turn_prompt(task, variant, seed, state, model)
     round_index = len(state.turns) // len(state.model_order) + 1
     turn_index = len(state.turns) + 1
+
+    if debate_mode == "manual":
+        response = manual_turn_io(
+            prompt, prompt_path=prompt_path, response_path=response_path,
+            input_fn=input_fn, print_fn=print_fn,
+        )
+        parsed = extract_knowledge_json(response) if response else None
+        vote = extract_consensus_vote(response) if response else None
+        turn = Turn(round_index, turn_index, model, prompt, response, parsed, vote)
+        state.turns.append(turn)
+        if parsed is not None:
+            state.latest_knowledge = parsed
+        if log_dir is not None:
+            _write_turn_log(log_dir, turn)
+        return turn
 
     last_error = None
     last_response = None
@@ -455,9 +508,12 @@ def run_turn(
 
 def run_round(
     task: str, variant: Optional[str], seed: dict, state: RelayState, *,
+    debate_mode: str = "api",
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    prompt_path: Optional[Path] = None, response_path: Optional[Path] = None,
+    input_fn: Callable[[str], str] = input,
     log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print,
 ) -> bool:
@@ -466,9 +522,11 @@ def run_round(
     for model in state.model_order:
         turn = run_turn(
             task, variant, seed, state, model,
+            debate_mode=debate_mode,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=max_retries, max_output_tokens=max_output_tokens,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn,
             log_dir=log_dir, print_fn=print_fn,
         )
         print_fn(f"  round {turn.round_index} [{turn.model}] vote={turn.consensus_vote} "
@@ -480,9 +538,12 @@ def run_round(
 def run_relay(
     task: str, seed: dict, *, variant: Optional[str] = None,
     model_order: Optional[list[str]] = None, max_rounds: int = DEFAULT_MAX_ROUNDS,
+    debate_mode: str = "api",
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    prompt_path: Optional[Path] = None, response_path: Optional[Path] = None,
+    input_fn: Callable[[str], str] = input,
     log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print, resume_state: Optional[RelayState] = None,
 ) -> RelayState:
@@ -492,9 +553,11 @@ def run_relay(
     for _ in range(rounds_done, state.max_rounds):
         consensus = run_round(
             task, variant, seed, state,
+            debate_mode=debate_mode,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=max_retries, max_output_tokens=max_output_tokens,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn,
             log_dir=log_dir, print_fn=print_fn,
         )
         if consensus:
@@ -572,37 +635,72 @@ def chunk_seed_units(seed: dict, batch_size: Optional[int]) -> list[dict]:
     ]
 
 
+def _batch_prompt_response_paths(
+    prompt_path: Optional[Path], response_path: Optional[Path], i: int, n_batches: int,
+) -> tuple[Optional[Path], Optional[Path]]:
+    if n_batches == 1 or prompt_path is None or response_path is None:
+        return prompt_path, response_path
+    suffix = f"_batch{i:04d}"
+    return (
+        prompt_path.with_name(f"{prompt_path.stem}{suffix}{prompt_path.suffix}"),
+        response_path.with_name(f"{response_path.stem}{suffix}{response_path.suffix}"),
+    )
+
+
 def run_relay_batched(
     task: str, seed: dict, *, variant: Optional[str] = None,
     model_order: Optional[list[str]] = None, max_rounds: int = DEFAULT_MAX_ROUNDS,
     batch_size: Optional[int] = None, max_workers: int = 4,
+    debate_mode: str = "api",
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_retries: int = DEFAULT_MAX_RETRIES, max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    prompt_path: Optional[Path] = None, response_path: Optional[Path] = None,
+    input_fn: Callable[[str], str] = input,
     log_dir: Optional[Path] = None,
     print_fn: Callable[[str], None] = print, resume_states: Optional[list] = None,
 ) -> list[RelayState]:
     """batch_size=None -> chạy y hệt run_relay() với seed gốc (1 phần tử list trả về) -- giữ
-    nguyên hành vi 4 task cũ. batch_size được set -> chia batch, chạy SONG SONG (mỗi batch tự
-    tuần tự Gemini<->OpenAI bên trong)."""
+    nguyên hành vi 4 task cũ. batch_size được set -> chia batch. debate_mode="api": các batch
+    chạy SONG SONG (mỗi batch tự tuần tự Gemini<->OpenAI bên trong). debate_mode="manual": LUÔN
+    chạy TUẦN TỰ từng batch (người dùng không thể copy-paste nhiều batch cùng lúc), mỗi batch
+    dùng 1 cặp prompt/response file RIÊNG (hậu tố "_batch<i>")."""
     batches = chunk_seed_units(seed, batch_size)
     resume_states = resume_states or [None] * len(batches)
 
     if len(batches) == 1:
         state = run_relay(
             task, batches[0], variant=variant, model_order=model_order, max_rounds=max_rounds,
+            debate_mode=debate_mode,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=max_retries, max_output_tokens=max_output_tokens,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn,
             log_dir=log_dir, print_fn=print_fn, resume_state=resume_states[0],
         )
         return [state]
 
-    # Nhiều batch chạy song song -> log "round X [model] vote=..." của TỪNG batch xen kẽ nhau,
-    # gần như không đọc được (đây chính là hàng trăm dòng người dùng thấy khi debug tốc độ) --
-    # khi batch hoá, LỌC BỚT chỉ còn dòng lỗi/debug/kết luận (">>> ", "[LỖI]", "[DEBUG]") + 1
-    # thanh progress bar theo SỐ BATCH đã xong (dễ theo dõi tiến độ thật hơn nhiều so với log
-    # thô). Người gọi vẫn có thể truyền print_fn khác để giữ nguyên log chi tiết nếu muốn.
+    if debate_mode == "manual":
+        states: list = []
+        for i, batch_seed in enumerate(batches):
+            print_fn(f"\n===== Batch {i + 1}/{len(batches)} =====")
+            batch_log_dir = (log_dir / f"batch_{i:04d}") if log_dir else None
+            if batch_log_dir:
+                batch_log_dir.mkdir(parents=True, exist_ok=True)
+            batch_prompt_path, batch_response_path = _batch_prompt_response_paths(prompt_path, response_path, i, len(batches))
+            states.append(run_relay(
+                task, batch_seed, variant=variant, model_order=model_order, max_rounds=max_rounds,
+                debate_mode="manual",
+                prompt_path=batch_prompt_path, response_path=batch_response_path, input_fn=input_fn,
+                max_retries=max_retries, log_dir=batch_log_dir, print_fn=print_fn, resume_state=resume_states[i],
+            ))
+        return states
+
+    # Nhiều batch chạy song song (debate_mode="api") -> log "round X [model] vote=..." của TỪNG
+    # batch xen kẽ nhau, gần như không đọc được (đây chính là hàng trăm dòng người dùng thấy khi
+    # debug tốc độ) -- khi batch hoá, LỌC BỚT chỉ còn dòng lỗi/debug/kết luận (">>> ", "[LỖI]",
+    # "[DEBUG]") + 1 thanh progress bar theo SỐ BATCH đã xong (dễ theo dõi tiến độ thật hơn nhiều
+    # so với log thô). Người gọi vẫn có thể truyền print_fn khác để giữ nguyên log chi tiết.
     def _filtered_print_fn(msg: str) -> None:
         if msg.startswith(("[LỖI]", "[DEBUG]", ">>>")):
             print_fn(msg)
@@ -613,6 +711,7 @@ def run_relay_batched(
             batch_log_dir.mkdir(parents=True, exist_ok=True)
         return run_relay(
             task, batch_seed, variant=variant, model_order=model_order, max_rounds=max_rounds,
+            debate_mode="api",
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=max_retries, max_output_tokens=max_output_tokens,
@@ -732,11 +831,20 @@ def resolve_clients(args) -> tuple:
     chung 1 client OpenAI-compatible (call_model() tự nhận diện qua _is_openai_style_client(),
     không cần phân biệt ở đây). --gemini-model/--openai-model/--*-base-url truyền tay LUÔN được
     ưu tiên cao nhất nếu có, kể cả khi cũng lấy key từ .env."""
-    env_path = Path(args.env_file) if args.env_file else Path(args.seed_json).resolve().parent / ".env"
+    if args.env_file:
+        env_path = Path(args.env_file)
+    elif args.location == "local":
+        env_path = env_paths.default_env_file(args.location)
+    else:
+        env_path = Path(args.seed_json).resolve().parent / ".env"
     env = load_env_file(env_path) if env_path.exists() else {}
 
-    if args.gemini_service_account_json:
-        gemini_client = load_gemini_client(args.gemini_service_account_json)
+    gemini_service_account_json = args.gemini_service_account_json
+    if not gemini_service_account_json and not args.env_file and args.location == "drive" and "GEMINI" not in env:
+        gemini_service_account_json = str(env_paths.gemini_service_account_path(args.location))
+
+    if gemini_service_account_json:
+        gemini_client = load_gemini_client(gemini_service_account_json)
         gemini_model = args.gemini_model or DEFAULT_GEMINI_MODEL
     else:
         gemini_env = env.get("GEMINI", {})
@@ -772,25 +880,29 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p1 = sub.add_parser("run", help="Chạy relay tự động 2 model (Gemini + OpenAI-compatible) qua API.")
+    p1 = sub.add_parser("run", help="Chạy relay tri thức (debate-mode api: tự động qua API; manual: copy-paste thủ công).")
     p1.add_argument("--task", required=True, help="Tên task tự do (không giới hạn danh sách cố định) -- dùng để tra INSTRUCTIONS_BY_TASK trong build_debate_seed.py.")
     p1.add_argument("--variant", default=None)
+    p1.add_argument("--debate-mode", choices=["api", "manual"], default="api", help='"api" (mặc định, tự động qua Gemini+OpenAI-compatible) hoặc "manual" (copy-paste thủ công qua file, không cần credential nào).')
+    env_paths.add_location_arg(p1)
     p1.add_argument("--seed-json", required=True)
-    p1.add_argument("--state-output", required=True)
-    p1.add_argument("--knowledge-output", required=True)
-    p1.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (xem load_env_file()) -- dùng khi KHÔNG truyền --gemini-service-account-json/--openai-api-key-file, cho cả Gemini (kể cả qua proxy local nói giao thức OpenAI) lẫn OpenAI.')
-    p1.add_argument("--gemini-service-account-json", default=None, help="Vertex AI service account JSON (điển hình: đang chạy Colab). Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p1.add_argument("--state-output", default=None, help="Mặc định: {knowledge_dir(--location)}/relay_state_<task>[_<variant>].json.")
+    p1.add_argument("--knowledge-output", default=None, help="Mặc định: {knowledge_dir(--location)}/knowledge_<task>[_<variant>].json.")
+    p1.add_argument("--prompt-file", default=None, help='Chỉ dùng khi --debate-mode manual. Mặc định: "relay_prompt_<task>[_<variant>].txt" cạnh --state-output.')
+    p1.add_argument("--response-file", default=None, help='Chỉ dùng khi --debate-mode manual. Mặc định: "relay_response_<task>[_<variant>].txt" cạnh --state-output.')
+    p1.add_argument("--env-file", default=None, help='Chỉ dùng khi --debate-mode api. File .env local dạng KEY="value" # base_url # model (xem load_env_file()) -- dùng khi KHÔNG truyền --gemini-service-account-json/--openai-api-key-file, cho cả Gemini (kể cả qua proxy local nói giao thức OpenAI) lẫn OpenAI. Mặc định: env_paths.default_env_file(--location) khi --location local.')
+    p1.add_argument("--gemini-service-account-json", default=None, help='Chỉ dùng khi --debate-mode api. Vertex AI service account JSON. Mặc định: env_paths.gemini_service_account_path(--location) khi --location drive.')
     p1.add_argument("--gemini-model", default=None)
     p1.add_argument("--gemini-base-url", default=None, help="Chỉ dùng khi KHÔNG có --gemini-service-account-json và muốn override base_url thay vì lấy từ --env-file.")
     p1.add_argument("--openai-api-key-file", default=None, help="File chứa OpenAI-compatible API key. Bỏ trống để lấy OPENAI_API_KEY/base_url/model từ --env-file.")
     p1.add_argument("--openai-base-url", default=None)
     p1.add_argument("--openai-model", default=None)
-    p1.add_argument("--model-order", default=",".join(DEFAULT_MODEL_ORDER), help="Danh sách model, phân tách bởi dấu phẩy (giá trị đầu tiên PHẢI hiểu là Gemini nếu là chuỗi \"gemini\", còn lại đều gọi qua OpenAI-compatible client).")
+    p1.add_argument("--model-order", default=None, help='Danh sách model, phân tách bởi dấu phẩy. Mặc định: "gemini,openai" (api) hoặc "gemini,chatgpt,claude" (manual).')
     p1.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
-    p1.add_argument("--max-output-tokens", type=int, default=DEFAULT_MAX_OUTPUT_TOKENS, help="Tăng nếu batch lớn/knowledge dài bị cắt cụt (lỗi 'Không parse được khối JSON hợp lệ').")
+    p1.add_argument("--max-output-tokens", type=int, default=DEFAULT_MAX_OUTPUT_TOKENS, help="Tăng nếu batch lớn/knowledge dài bị cắt cụt (lỗi 'Không parse được khối JSON hợp lệ'). Không áp dụng --debate-mode manual.")
     p1.add_argument("--batch-size", type=int, default=None, help="Chia candidate thành nhiều batch (mặc định None = 1 batch duy nhất, đúng hành vi cũ).")
-    p1.add_argument("--max-workers", type=int, default=4, help="Số batch chạy song song (chỉ có ý nghĩa khi --batch-size được set).")
+    p1.add_argument("--max-workers", type=int, default=4, help="Số batch chạy song song (chỉ áp dụng --debate-mode api -- manual luôn chạy tuần tự).")
     p1.add_argument("--log-dir", default=None, help="Optional: ghi lại prompt/response từng lượt để audit.")
     p1.add_argument("--resume", action="store_true", help="Tiếp tục từ --state-output (hoặc các file batch tương ứng) nếu đã tồn tại.")
 
@@ -803,14 +915,26 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.seed_json, encoding="utf-8") as f:
             seed = json.load(f)
 
-        gemini_client, gemini_model, openai_client, openai_model = resolve_clients(args)
+        suffix = f"_{args.task}" + (f"_{args.variant}" if args.variant else "")
+        state_path = Path(args.state_output) if args.state_output else env_paths.knowledge_dir(args.location) / f"relay_state{suffix}.json"
+        knowledge_output = Path(args.knowledge_output) if args.knowledge_output else env_paths.knowledge_dir(args.location) / f"knowledge{suffix}.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+
+        gemini_client = gemini_model = openai_client = openai_model = None
+        prompt_path = response_path = None
+        input_fn = input
+        if args.debate_mode == "api":
+            gemini_client, gemini_model, openai_client, openai_model = resolve_clients(args)
+        else:
+            prompt_path = Path(args.prompt_file) if args.prompt_file else state_path.with_name(f"relay_prompt{suffix}.txt")
+            response_path = Path(args.response_file) if args.response_file else state_path.with_name(f"relay_response{suffix}.txt")
 
         log_dir = Path(args.log_dir) if args.log_dir else None
         if log_dir:
             log_dir.mkdir(parents=True, exist_ok=True)
 
-        model_order = args.model_order.split(",")
-        state_path = Path(args.state_output)
+        default_model_order = DEFAULT_MANUAL_MODEL_ORDER if args.debate_mode == "manual" else DEFAULT_MODEL_ORDER
+        model_order = args.model_order.split(",") if args.model_order else default_model_order
 
         n_batches_guess = len(chunk_seed_units(seed, args.batch_size))
         resume_states = None
@@ -823,18 +947,20 @@ def main(argv: Optional[list[str]] = None) -> None:
         states = run_relay_batched(
             args.task, seed, variant=args.variant, model_order=model_order, max_rounds=args.max_rounds,
             batch_size=args.batch_size, max_workers=args.max_workers,
+            debate_mode=args.debate_mode,
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=args.max_retries, max_output_tokens=args.max_output_tokens,
+            prompt_path=prompt_path, response_path=response_path, input_fn=input_fn,
             log_dir=log_dir, resume_states=resume_states,
         )
         save_batch_states(states, state_path)
 
         if len(states) == 1:
-            export_knowledge_graph(states[0], args.task, args.variant, Path(args.knowledge_output))
+            export_knowledge_graph(states[0], args.task, args.variant, knowledge_output)
         else:
             export_merged_knowledge_graph(
-                states, args.task, args.variant, Path(args.knowledge_output),
+                states, args.task, args.variant, knowledge_output,
                 model_order=model_order, max_rounds=args.max_rounds,
             )
 
