@@ -338,12 +338,16 @@ def call_model(
     gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    system_instruction: Optional[str] = None, temperature: float = 0.7,
 ) -> str:
     """model_name == "gemini" -> dùng gemini_client/gemini_model; NGƯỢC LẠI (mọi tên khác, ví dụ
     "openai") -> dùng openai_client/openai_model. Client THẬT SỰ gọi ra sao (Vertex AI SDK hay
     OpenAI-compatible HTTP) được TỰ NHẬN DIỆN qua _is_openai_style_client() -- KHÔNG cần biết
     trước đang chạy Colab (Vertex service account) hay local (.env, kể cả Gemini qua 1 proxy local
     nói giao thức OpenAI) -- chỉ cần đưa ĐÚNG loại client object vào, code tự xử lý đúng cách.
+    Hàm dùng chung cho CẢ debate relay (không system_instruction, prompt tự chứa mọi thứ) LẪN các
+    pipeline khác (Code-switching classify-cs/generate-questions/filter-questions) muốn tách
+    system prompt riêng, giống hệt cách các pipeline Hán Việt/Từ mượn/... vẫn dùng system prompt.
 
     max_output_tokens mặc định CAO (mỗi lượt phải trả về TOÀN BỘ knowledge graph của cả batch,
     không phải diff -- batch càng lớn/càng nhiều field thì response càng dài; response bị cắt
@@ -352,9 +356,13 @@ def call_model(
     model = gemini_model if model_name == "gemini" else openai_model
 
     if _is_openai_style_client(client):
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
         response = client.chat.completions.create(
-            model=model, messages=[{"role": "user", "content": prompt}],
-            temperature=0.7, max_tokens=max_output_tokens,
+            model=model, messages=messages,
+            temperature=temperature, max_tokens=max_output_tokens,
         )
         return response.choices[0].message.content or ""
 
@@ -363,7 +371,10 @@ def call_model(
 
         response = gemini_client.models.generate_content(
             model=gemini_model, contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.7, max_output_tokens=max_output_tokens),
+            config=types.GenerateContentConfig(
+                temperature=temperature, max_output_tokens=max_output_tokens,
+                system_instruction=system_instruction,
+            ),
         )
         return response.text or ""
 

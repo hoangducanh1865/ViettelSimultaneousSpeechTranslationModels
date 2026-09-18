@@ -59,8 +59,9 @@ _THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_THIS_DIR.parents[1] / "cac_hien_tuong_dac_biet_trong_tieng_viet"))
 sys.path.insert(0, str(_THIS_DIR.parents[3]))  # datasets_qa/, cho translate_dataset
 
+import auto_model_relay  # noqa: E402 -- dùng chung call_model()/resolve_clients() cho auto-detect Colab/local
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index  # noqa: E402
-from translate_dataset import DEFAULT_MODEL, load_gemini_client  # noqa: E402
+from translate_dataset import DEFAULT_MODEL  # noqa: E402
 
 DEFAULT_BATCH_SIZE = 15
 DEFAULT_GEN_BATCH_SIZE = 15
@@ -115,20 +116,17 @@ Output: CHỈ trả về JSON array cùng độ dài, mỗi phần tử {"id": <
 
 
 def _classify_cs_fallback_batch(client, model, batch, max_retries):
-    from google.genai import types
-
     payload = [{"id": item["id"], "term": item["term"], "transcript": item["transcript"]} for item in batch]
     ids_sent = {item["id"] for item in batch}
     last_error = None
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model, contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(
-                    system_instruction=CS_CLASSIFY_FALLBACK_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
-                ),
+            raw = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=CS_CLASSIFY_FALLBACK_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
             )
-            raw = (response.text or "").strip()
+            raw = raw.strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -361,18 +359,17 @@ def _build_count_classify_question(record: dict, rng: random.Random) -> Optional
 
 
 def _gen_qual_batch(client, model, system_prompt, batch, max_retries):
-    from google.genai import types
-
     payload = [item["payload"] for item in batch]
     ids_sent = {item["id"] for item in batch}
     last_error = None
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
-                model=model, contents=json.dumps(payload, ensure_ascii=False),
-                config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192),
+            raw = auto_model_relay.call_model(
+                "gemini", json.dumps(payload, ensure_ascii=False),
+                gemini_client=client, gemini_model=model,
+                system_instruction=system_prompt, temperature=0.7, max_output_tokens=8192,
             )
-            raw = (response.text or "").strip()
+            raw = raw.strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
             out = {}
@@ -528,25 +525,21 @@ def filter_questions(
 
 
 def make_gemini_provider_call(client, model: str):
-    from google.genai import types
-
     def _call(payload_json: str) -> str:
-        response = client.models.generate_content(
-            model=model, contents=payload_json,
-            config=types.GenerateContentConfig(system_instruction=FILTER_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=8192),
+        return auto_model_relay.call_model(
+            "gemini", payload_json, gemini_client=client, gemini_model=model,
+            system_instruction=FILTER_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=8192,
         )
-        return response.text or ""
 
     return _call
 
 
 def make_openai_provider_call(openai_client, model: str):
     def _call(payload_json: str) -> str:
-        response = openai_client.chat.completions.create(
-            model=model, temperature=0.0, max_tokens=8192,
-            messages=[{"role": "system", "content": FILTER_SYSTEM_PROMPT}, {"role": "user", "content": payload_json}],
+        return auto_model_relay.call_model(
+            "openai", payload_json, openai_client=openai_client, openai_model=model,
+            system_instruction=FILTER_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=8192,
         )
-        return response.choices[0].message.content or ""
 
     return _call
 
@@ -555,26 +548,50 @@ def make_openai_provider_call(openai_client, model: str):
 # CLI
 # ============================================================================================
 
+def _resolve_role_client(service_account_json, env_file, model_arg, role: str, input_path):
+    """TỰ NHẬN DIỆN nguồn credential cho 1 "vai" (GEMINI/OPENAI), giống hệt nguyên tắc
+    auto_model_relay.resolve_clients() -- ưu tiên --service-account-json (Vertex AI thật, chỉ áp
+    dụng cho role="GEMINI"); nếu không có, rơi về --env-file (mặc định ".env" cạnh --input) đọc
+    <role>_API_KEY/base_url/model. Trả về (client, model) -- client có thể là genai.Client (Vertex)
+    hoặc OpenAI-compatible client, auto_model_relay.call_model() tự biết cách gọi đúng."""
+    if role == "GEMINI" and service_account_json:
+        return auto_model_relay.load_gemini_client(service_account_json), (model_arg or DEFAULT_MODEL)
+
+    env_path = Path(env_file) if env_file else Path(input_path).resolve().parent / ".env"
+    env = auto_model_relay.load_env_file(env_path) if env_path.exists() else {}
+    role_env = env.get(role, {})
+    api_key, base_url = role_env.get("api_key"), role_env.get("base_url")
+    model = model_arg or role_env.get("model") or DEFAULT_MODEL
+    if not (api_key and base_url):
+        raise ValueError(
+            f"Không có --service-account-json (role={role}), và không tìm được {role}_API_KEY + "
+            f"base_url hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình."
+        )
+    return auto_model_relay._make_openai_client(api_key, base_url), model
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p1 = sub.add_parser("classify-cs", help="Gắn field debate (hoặc Gemini fallback) cho từng (sample, thuật ngữ).")
-    p1.add_argument("--service-account-json", required=True)
+    p1.add_argument("--service-account-json", default=None, help="Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p1.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input).')
     p1.add_argument("--input", required=True)
     p1.add_argument("--knowledge-json", default=None)
     p1.add_argument("--output", required=True)
-    p1.add_argument("--model", default=DEFAULT_MODEL)
+    p1.add_argument("--model", default=None)
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
     p2 = sub.add_parser("generate-questions", help="Sinh câu hỏi 6 loại (A-F) từ output classify-cs.")
-    p2.add_argument("--service-account-json", required=True)
+    p2.add_argument("--service-account-json", default=None, help="Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p2.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input).')
     p2.add_argument("--input", required=True)
     p2.add_argument("--knowledge-json", default=None)
     p2.add_argument("--output", required=True)
-    p2.add_argument("--model", default=DEFAULT_MODEL)
+    p2.add_argument("--model", default=None)
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
@@ -585,9 +602,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     p3.add_argument("--input", required=True)
     p3.add_argument("--kept-output", required=True)
     p3.add_argument("--rules-output", required=True)
-    p3.add_argument("--service-account-json", default=None, help="Bắt buộc nếu --provider gemini.")
-    p3.add_argument("--gemini-model", default=DEFAULT_MODEL)
-    p3.add_argument("--openai-api-key-file", default=None, help="Bắt buộc nếu --provider openai.")
+    p3.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (mặc định: ".env" cạnh --input) -- dùng khi thiếu --service-account-json/--openai-api-key-file.')
+    p3.add_argument("--service-account-json", default=None, help="Vertex AI (--provider gemini). Bỏ trống để lấy GEMINI_API_KEY từ --env-file.")
+    p3.add_argument("--gemini-model", default=None)
+    p3.add_argument("--openai-api-key-file", default=None, help="File key OpenAI-compatible (--provider openai). Bỏ trống để lấy OPENAI_API_KEY từ --env-file.")
     p3.add_argument("--openai-base-url", default=None)
     p3.add_argument("--openai-model", default=None)
     p3.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -597,11 +615,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     if args.command == "classify-cs":
-        client = load_gemini_client(args.service_account_json)
+        client, model = _resolve_role_client(args.service_account_json, args.env_file, args.model, "GEMINI", args.input)
         records = _load_jsonl(Path(args.input))
         kg = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         out = classify_cs(
-            client, args.model, records, kg,
+            client, model, records, kg,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
         with open(args.output, "w", encoding="utf-8") as f:
@@ -610,11 +628,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         print(f"Đã ghi {len(out)} sample đã classify vào {args.output}")
 
     elif args.command == "generate-questions":
-        client = load_gemini_client(args.service_account_json)
+        client, model = _resolve_role_client(args.service_account_json, args.env_file, args.model, "GEMINI", args.input)
         records = _load_jsonl(Path(args.input))
         kg = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
-            client, args.model, records, Path(args.output), knowledge_graph=kg,
+            client, model, records, Path(args.output), knowledge_graph=kg,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
             seed=args.seed,
         )
@@ -622,16 +640,15 @@ def main(argv: Optional[list[str]] = None) -> None:
     elif args.command == "filter-questions":
         records = _load_jsonl(Path(args.input))
         if args.provider == "gemini":
-            assert args.service_account_json, "--service-account-json bắt buộc khi --provider gemini"
-            client = load_gemini_client(args.service_account_json)
-            provider_call = make_gemini_provider_call(client, args.gemini_model)
+            client, model = _resolve_role_client(args.service_account_json, args.env_file, args.gemini_model, "GEMINI", args.input)
+            provider_call = make_gemini_provider_call(client, model)
         else:
-            from auto_model_relay import load_openai_client  # tái dùng loader đã có, không viết lại
-            assert args.openai_api_key_file and args.openai_base_url and args.openai_model, (
-                "--openai-api-key-file/--openai-base-url/--openai-model bắt buộc khi --provider openai"
-            )
-            openai_client = load_openai_client(Path(args.openai_api_key_file), args.openai_base_url)
-            provider_call = make_openai_provider_call(openai_client, args.openai_model)
+            if args.openai_api_key_file:
+                openai_client = auto_model_relay.load_openai_client(Path(args.openai_api_key_file), args.openai_base_url or auto_model_relay.DEFAULT_OPENAI_BASE_URL)
+                openai_model = args.openai_model or auto_model_relay.DEFAULT_OPENAI_MODEL
+            else:
+                openai_client, openai_model = _resolve_role_client(None, args.env_file, args.openai_model, "OPENAI", args.input)
+            provider_call = make_openai_provider_call(openai_client, openai_model)
 
         filter_questions(
             provider_call, records, Path(args.kept_output), Path(args.rules_output),
