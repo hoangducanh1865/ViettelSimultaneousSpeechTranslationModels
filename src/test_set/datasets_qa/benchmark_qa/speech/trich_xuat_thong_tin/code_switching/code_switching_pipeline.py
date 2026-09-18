@@ -286,6 +286,80 @@ def extract_terms(
 
 
 # ============================================================================================
+# Step 4: scan-dictionary
+# ============================================================================================
+
+def scan_dictionary(dictionary_path: Path, transcripts_path: Path, output_path: Path) -> None:
+    """Đọc cs_broad_new.txt (1 token/dòng, đã lowercase, KHÔNG có phrase nhiều từ) thành 1 set.
+    Với mỗi sample trong giga_speech_test.jsonl, tách "text" theo khoảng trắng (transcript đã ở
+    dạng ASR-normalized, tách trắng là đủ ranh giới từ), so khớp CHÍNH XÁC (lowercase, word-
+    boundary, KHÔNG lọc độ dài -- dùng đúng nguyên từ điển chuyên gia cung cấp) từng token với
+    dictionary set. KHÔNG suy luận cụm nhiều từ (dictionary chỉ có token đơn)."""
+    with open(dictionary_path, encoding="utf-8") as f:
+        dictionary = {line.strip().lower() for line in f if line.strip()}
+
+    with open(transcripts_path, encoding="utf-8") as f:
+        records = [json.loads(line) for line in f if line.strip()]
+
+    n_with_terms = 0
+    with open(output_path, "w", encoding="utf-8") as f:
+        for r in records:
+            tokens = r["text"].lower().split()
+            cs_terms = [t for t in tokens if t in dictionary]
+            record = dict(r)
+            record["cs_terms"] = cs_terms
+            if cs_terms:
+                n_with_terms += 1
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    print(f"Đã quét {len(records)} sample với từ điển {len(dictionary)} token -- "
+          f"{n_with_terms} sample có >=1 cs_terms -- đã lưu {output_path}")
+
+
+# ============================================================================================
+# Step 5: merge-datasets
+# ============================================================================================
+
+_DATASET_SOURCE_TEXT_FIELD = {
+    "GigaSpeech": "text",
+    "ViMed_Hard": "segment_text",
+    "ViMed": "segment_text",
+}
+
+
+def merge_datasets(giga_scanned_path: Path, vimed_hard_path: Path, vimed_normal_path: Path, output_path: Path) -> None:
+    """Hợp nhất 3 nguồn thành code_switching_qa.jsonl. MỖI record GIỮ NGUYÊN VẸN toàn bộ field
+    gốc (không xóa field nào -- để truy vết ngược lại data gốc) + THÊM 2 field chuẩn hóa đồng
+    nhất giữa mọi nguồn ("text", "cs_terms") + "dataset_source". Đường dẫn audio
+    ("audio_filepath" ở GigaSpeech, "audio" ở ViMed) giữ NGUYÊN key + value gốc -- KHÔNG đổi tên,
+    KHÔNG parse lại."""
+    sources = [
+        ("GigaSpeech", giga_scanned_path),
+        ("ViMed_Hard", vimed_hard_path),
+        ("ViMed", vimed_normal_path),
+    ]
+
+    n_written = 0
+    with open(output_path, "w", encoding="utf-8") as out_f:
+        for dataset_source, path in sources:
+            text_field = _DATASET_SOURCE_TEXT_FIELD[dataset_source]
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    r = json.loads(line)
+                    record = dict(r)
+                    record["id"] = f"cs-{n_written:05d}"
+                    record["text"] = r[text_field]
+                    record["cs_terms"] = r.get("cs_terms") or []
+                    record["dataset_source"] = dataset_source
+                    out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    n_written += 1
+
+    print(f"Đã hợp nhất {n_written} sample từ 3 nguồn (GigaSpeech + ViMed_Hard + ViMed) vào {output_path}")
+
+
+# ============================================================================================
 # CLI
 # ============================================================================================
 
@@ -316,6 +390,17 @@ def main(argv: Optional[list[str]] = None) -> None:
     p3.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p3.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
 
+    p4 = sub.add_parser("scan-dictionary", help="Quét cs_broad_new.txt trên giga_speech_test.jsonl (khớp token chính xác).")
+    p4.add_argument("--dictionary", required=True)
+    p4.add_argument("--transcripts", required=True)
+    p4.add_argument("--output", required=True)
+
+    p5 = sub.add_parser("merge-datasets", help="Hợp nhất GigaSpeech (đã quét) + ViMed_Hard + ViMed thành code_switching_qa.jsonl.")
+    p5.add_argument("--giga-scanned", required=True)
+    p5.add_argument("--vimed-hard", required=True)
+    p5.add_argument("--vimed-normal", required=True)
+    p5.add_argument("--output", required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "build-manifest":
@@ -333,6 +418,14 @@ def main(argv: Optional[list[str]] = None) -> None:
         extract_terms(
             client, args.model, records, Path(args.output),
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
+        )
+
+    elif args.command == "scan-dictionary":
+        scan_dictionary(Path(args.dictionary), Path(args.transcripts), Path(args.output))
+
+    elif args.command == "merge-datasets":
+        merge_datasets(
+            Path(args.giga_scanned), Path(args.vimed_hard), Path(args.vimed_normal), Path(args.output),
         )
 
 
