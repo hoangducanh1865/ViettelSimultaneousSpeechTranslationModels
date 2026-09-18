@@ -42,6 +42,18 @@ Usage:
         --max-rounds 10 --batch-size 8
 
     python auto_model_relay.py show --state relay_state_tu_lay_toan_bo.json
+
+Chạy LOCAL (không cần service account/file key riêng, dùng chung 1 file .env dạng
+KEY="value" # base_url # model -- xem load_env_file()):
+    python auto_model_relay.py run --task code_switching \\
+        --seed-json code_switching/debate_seed_code_switching.json \\
+        --state-output code_switching/relay_state_code_switching.json \\
+        --knowledge-output code_switching/knowledge_code_switching.json \\
+        --env-file code_switching/.env \\
+        --max-rounds 10 --batch-size 24 --max-workers 24
+Không truyền --env-file thì mặc định tìm file ".env" cạnh --seed-json. Colab (service account +
+file key) và local (.env) dùng CHUNG 1 lệnh/1 code -- resolve_clients() tự chọn nguồn credential
+phù hợp dựa trên tham số nào được truyền, không cần biết trước đang chạy ở đâu.
 """
 
 from __future__ import annotations
@@ -55,6 +67,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
+
+from tqdm.auto import tqdm
 
 from knowledge_graph import SCHEMA_VERSION
 
@@ -239,6 +253,10 @@ def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: Rela
 
 
 def load_gemini_client(service_account_path: str, *, location: str = "global"):
+    """Client Vertex AI THẬT (google.genai SDK) -- dùng khi có --gemini-service-account-json
+    (điển hình: đang chạy trong Colab). Phân biệt với client OpenAI-compatible (dùng khi chạy
+    local qua .env, kể cả CHO Gemini nếu trỏ vào 1 proxy local nói giao thức OpenAI) bằng
+    _is_openai_style_client() trong call_model() bên dưới -- không cần biết trước đang ở env nào."""
     from google import genai
     from google.oauth2 import service_account
 
@@ -252,19 +270,67 @@ def load_gemini_client(service_account_path: str, *, location: str = "global"):
     return genai.Client(vertexai=True, project=project_id, location=location, credentials=credentials)
 
 
-def load_openai_client(api_key_path: Path, base_url: str):
+def _make_openai_client(api_key: str, base_url: str):
     from openai import OpenAI
 
+    return OpenAI(api_key=api_key, base_url=base_url)
+
+
+def load_openai_client(api_key_path: Path, base_url: str):
     raw = Path(api_key_path).read_text(encoding="utf-8").strip()
     # Chấp nhận cả 2 dạng: key trần trên 1 dòng, HOẶC dòng kiểu env-var
     # OPENAI_API_KEY="..."/OPENAI_API_KEY=... -- lấy đúng phần giá trị, bỏ dấu nháy nếu có.
     if "=" in raw:
         raw = raw.split("=", 1)[1].strip()
     api_key = raw.strip('"').strip("'")
-    return OpenAI(api_key=api_key, base_url=base_url)
+    return _make_openai_client(api_key, base_url)
+
+
+def is_colab() -> bool:
+    try:
+        import google.colab  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def load_env_file(path: Path) -> dict[str, dict[str, Optional[str]]]:
+    """Parse 1 file .env dạng đặc thù đang dùng cho chạy local:
+        OPENAI_API_KEY="..." # https://r3wrrfi.abc-tunnel.us/v1 # cx/gpt-5.6-luna
+        GEMINI_API_KEY="..." # http://localhost:20128/v1 # ag/gemini-3.5-flash-extra-low
+    Mỗi dòng KEY="value" [# base_url [# model]] -- base_url/model nằm trong COMMENT (không phải
+    biến env chuẩn) vì đây là quy ước riêng của người dùng, không phải cú pháp .env thông thường.
+    Trả về {"OPENAI": {"api_key":..., "base_url":..., "model":...}, "GEMINI": {...}} (bỏ qua dòng
+    trống/bắt đầu bằng "#" thuần, không hỗ trợ các biến env khác ngoài *_API_KEY)."""
+    result: dict[str, dict[str, Optional[str]]] = {}
+    if not path.exists():
+        return result
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key_part, _, rest = line.partition("=")
+        key_part = key_part.strip()
+        if not key_part.endswith("_API_KEY"):
+            continue
+        prefix = key_part[: -len("_API_KEY")]  # "OPENAI" | "GEMINI" | ...
+
+        value_part, _, comment_part = rest.partition("#")
+        api_key = value_part.strip().strip('"').strip("'")
+        comment_fields = [c.strip() for c in comment_part.split("#")] if comment_part else []
+        base_url = comment_fields[0] if len(comment_fields) >= 1 and comment_fields[0] else None
+        model = comment_fields[1] if len(comment_fields) >= 2 and comment_fields[1] else None
+
+        result[prefix] = {"api_key": api_key or None, "base_url": base_url, "model": model}
+    return result
 
 
 DEFAULT_MAX_OUTPUT_TOKENS = 32768
+
+
+def _is_openai_style_client(client) -> bool:
+    return hasattr(client, "chat") and hasattr(client.chat, "completions")
 
 
 def call_model(
@@ -273,13 +339,25 @@ def call_model(
     openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
 ) -> str:
-    """model_name == "gemini" -> gọi Gemini API; NGƯỢC LẠI (mọi tên khác, ví dụ "openai") -> gọi
-    model OpenAI-compatible qua base_url riêng. Đây là điểm THAY THẾ DUY NHẤT so với
-    manual_model_relay.py: lấy response NGAY LẬP TỨC qua API, không cần người dán tay.
+    """model_name == "gemini" -> dùng gemini_client/gemini_model; NGƯỢC LẠI (mọi tên khác, ví dụ
+    "openai") -> dùng openai_client/openai_model. Client THẬT SỰ gọi ra sao (Vertex AI SDK hay
+    OpenAI-compatible HTTP) được TỰ NHẬN DIỆN qua _is_openai_style_client() -- KHÔNG cần biết
+    trước đang chạy Colab (Vertex service account) hay local (.env, kể cả Gemini qua 1 proxy local
+    nói giao thức OpenAI) -- chỉ cần đưa ĐÚNG loại client object vào, code tự xử lý đúng cách.
 
     max_output_tokens mặc định CAO (mỗi lượt phải trả về TOÀN BỘ knowledge graph của cả batch,
     không phải diff -- batch càng lớn/càng nhiều field thì response càng dài; response bị cắt
     cụt giữa chừng sẽ KHÔNG parse được JSON, gây lỗi "Không parse được khối JSON hợp lệ")."""
+    client = gemini_client if model_name == "gemini" else openai_client
+    model = gemini_model if model_name == "gemini" else openai_model
+
+    if _is_openai_style_client(client):
+        response = client.chat.completions.create(
+            model=model, messages=[{"role": "user", "content": prompt}],
+            temperature=0.7, max_tokens=max_output_tokens,
+        )
+        return response.choices[0].message.content or ""
+
     if model_name == "gemini":
         from google.genai import types
 
@@ -289,11 +367,10 @@ def call_model(
         )
         return response.text or ""
 
-    response = openai_client.chat.completions.create(
-        model=openai_model, messages=[{"role": "user", "content": prompt}],
-        temperature=0.7, max_tokens=max_output_tokens,
+    raise TypeError(
+        f"Client cho model_name={model_name!r} không phải Vertex AI genai.Client cũng không "
+        "phải OpenAI-compatible client -- không biết cách gọi."
     )
-    return response.choices[0].message.content or ""
 
 
 def _turn_to_dict(t: Turn) -> dict:
@@ -505,6 +582,15 @@ def run_relay_batched(
         )
         return [state]
 
+    # Nhiều batch chạy song song -> log "round X [model] vote=..." của TỪNG batch xen kẽ nhau,
+    # gần như không đọc được (đây chính là hàng trăm dòng người dùng thấy khi debug tốc độ) --
+    # khi batch hoá, LỌC BỚT chỉ còn dòng lỗi/debug/kết luận (">>> ", "[LỖI]", "[DEBUG]") + 1
+    # thanh progress bar theo SỐ BATCH đã xong (dễ theo dõi tiến độ thật hơn nhiều so với log
+    # thô). Người gọi vẫn có thể truyền print_fn khác để giữ nguyên log chi tiết nếu muốn.
+    def _filtered_print_fn(msg: str) -> None:
+        if msg.startswith(("[LỖI]", "[DEBUG]", ">>>")):
+            print_fn(msg)
+
     def _run_one(i: int, batch_seed: dict) -> RelayState:
         batch_log_dir = (log_dir / f"batch_{i:04d}") if log_dir else None
         if batch_log_dir:
@@ -514,15 +600,17 @@ def run_relay_batched(
             gemini_client=gemini_client, gemini_model=gemini_model,
             openai_client=openai_client, openai_model=openai_model,
             max_retries=max_retries, max_output_tokens=max_output_tokens,
-            log_dir=batch_log_dir, print_fn=print_fn, resume_state=resume_states[i],
+            log_dir=batch_log_dir, print_fn=_filtered_print_fn, resume_state=resume_states[i],
         )
 
     states: list = [None] * len(batches)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_run_one, i, b): i for i, b in enumerate(batches)}
-        for future in as_completed(futures):
-            i = futures[future]
-            states[i] = future.result()
+        with tqdm(total=len(batches), desc=f"debate {task} ({len(batches)} batch, {max_workers} luồng)") as pbar:
+            for future in as_completed(futures):
+                i = futures[future]
+                states[i] = future.result()
+                pbar.update(1)
     return states
 
 
@@ -620,6 +708,50 @@ def load_batch_states(state_output: Path, n_batches: int) -> list[Optional[Relay
     return result
 
 
+def resolve_clients(args) -> tuple:
+    """TỰ NHẬN DIỆN nguồn credential cho cả Gemini lẫn OpenAI, không cần biết trước đang chạy
+    Colab hay local: ưu tiên --gemini-service-account-json (Vertex AI thật, --openai-api-key-file
+    (file key riêng) nếu được truyền; nếu KHÔNG, rơi về --env-file (mặc định .env cạnh
+    --seed-json nếu không truyền --env-file) -- CẢ Gemini lẫn OpenAI khi đọc từ .env đều dùng
+    chung 1 client OpenAI-compatible (call_model() tự nhận diện qua _is_openai_style_client(),
+    không cần phân biệt ở đây). --gemini-model/--openai-model/--*-base-url truyền tay LUÔN được
+    ưu tiên cao nhất nếu có, kể cả khi cũng lấy key từ .env."""
+    env_path = Path(args.env_file) if args.env_file else Path(args.seed_json).resolve().parent / ".env"
+    env = load_env_file(env_path) if env_path.exists() else {}
+
+    if args.gemini_service_account_json:
+        gemini_client = load_gemini_client(args.gemini_service_account_json)
+        gemini_model = args.gemini_model or DEFAULT_GEMINI_MODEL
+    else:
+        gemini_env = env.get("GEMINI", {})
+        gemini_api_key = gemini_env.get("api_key")
+        gemini_base_url = args.gemini_base_url or gemini_env.get("base_url")
+        gemini_model = args.gemini_model or gemini_env.get("model") or DEFAULT_GEMINI_MODEL
+        if not (gemini_api_key and gemini_base_url):
+            raise ValueError(
+                f"Không có --gemini-service-account-json, và không tìm được GEMINI_API_KEY + "
+                f"base_url hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình Gemini."
+            )
+        gemini_client = _make_openai_client(gemini_api_key, gemini_base_url)
+
+    if args.openai_api_key_file:
+        openai_client = load_openai_client(Path(args.openai_api_key_file), args.openai_base_url or DEFAULT_OPENAI_BASE_URL)
+        openai_model = args.openai_model or DEFAULT_OPENAI_MODEL
+    else:
+        openai_env = env.get("OPENAI", {})
+        openai_api_key = openai_env.get("api_key")
+        openai_base_url = args.openai_base_url or openai_env.get("base_url")
+        openai_model = args.openai_model or openai_env.get("model") or DEFAULT_OPENAI_MODEL
+        if not (openai_api_key and openai_base_url):
+            raise ValueError(
+                f"Không có --openai-api-key-file, và không tìm được OPENAI_API_KEY + base_url "
+                f"hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình OpenAI."
+            )
+        openai_client = _make_openai_client(openai_api_key, openai_base_url)
+
+    return gemini_client, gemini_model, openai_client, openai_model
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -630,11 +762,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--seed-json", required=True)
     p1.add_argument("--state-output", required=True)
     p1.add_argument("--knowledge-output", required=True)
-    p1.add_argument("--gemini-service-account-json", required=True)
-    p1.add_argument("--gemini-model", default=DEFAULT_GEMINI_MODEL)
-    p1.add_argument("--openai-api-key-file", required=True)
-    p1.add_argument("--openai-base-url", default=DEFAULT_OPENAI_BASE_URL)
-    p1.add_argument("--openai-model", default=DEFAULT_OPENAI_MODEL)
+    p1.add_argument("--env-file", default=None, help='File .env local dạng KEY="value" # base_url # model (xem load_env_file()) -- dùng khi KHÔNG truyền --gemini-service-account-json/--openai-api-key-file, cho cả Gemini (kể cả qua proxy local nói giao thức OpenAI) lẫn OpenAI.')
+    p1.add_argument("--gemini-service-account-json", default=None, help="Vertex AI service account JSON (điển hình: đang chạy Colab). Bỏ trống để lấy GEMINI_API_KEY/base_url/model từ --env-file.")
+    p1.add_argument("--gemini-model", default=None)
+    p1.add_argument("--gemini-base-url", default=None, help="Chỉ dùng khi KHÔNG có --gemini-service-account-json và muốn override base_url thay vì lấy từ --env-file.")
+    p1.add_argument("--openai-api-key-file", default=None, help="File chứa OpenAI-compatible API key. Bỏ trống để lấy OPENAI_API_KEY/base_url/model từ --env-file.")
+    p1.add_argument("--openai-base-url", default=None)
+    p1.add_argument("--openai-model", default=None)
     p1.add_argument("--model-order", default=",".join(DEFAULT_MODEL_ORDER), help="Danh sách model, phân tách bởi dấu phẩy (giá trị đầu tiên PHẢI hiểu là Gemini nếu là chuỗi \"gemini\", còn lại đều gọi qua OpenAI-compatible client).")
     p1.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
@@ -653,8 +787,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.seed_json, encoding="utf-8") as f:
             seed = json.load(f)
 
-        gemini_client = load_gemini_client(args.gemini_service_account_json)
-        openai_client = load_openai_client(Path(args.openai_api_key_file), args.openai_base_url)
+        gemini_client, gemini_model, openai_client, openai_model = resolve_clients(args)
 
         log_dir = Path(args.log_dir) if args.log_dir else None
         if log_dir:
@@ -674,8 +807,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         states = run_relay_batched(
             args.task, seed, variant=args.variant, model_order=model_order, max_rounds=args.max_rounds,
             batch_size=args.batch_size, max_workers=args.max_workers,
-            gemini_client=gemini_client, gemini_model=args.gemini_model,
-            openai_client=openai_client, openai_model=args.openai_model,
+            gemini_client=gemini_client, gemini_model=gemini_model,
+            openai_client=openai_client, openai_model=openai_model,
             max_retries=args.max_retries, max_output_tokens=args.max_output_tokens,
             log_dir=log_dir, resume_states=resume_states,
         )
