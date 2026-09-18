@@ -113,6 +113,24 @@ def extract_consensus_vote(response_text: str) -> Optional[str]:
     return m.group(1).upper() if m else None
 
 
+def describe_json_error(response_text: str) -> str:
+    """Tái hiện ĐÚNG logic extract_knowledge_json() để lấy lại text đã thử parse, rồi báo chính
+    xác json.JSONDecodeError xảy ra ở đâu (dòng/cột) kèm đoạn text quanh đó -- head/tail 300 ký
+    tự không đủ để thấy lỗi cú pháp nằm GIỮA 1 response dài hàng nghìn ký tự."""
+    matches = _JSON_FENCE_RE.findall(response_text)
+    candidate = matches[-1].strip() if matches else response_text.strip()
+    try:
+        json.loads(candidate)
+        return "Parse lại thành công (?) -- không tái hiện được lỗi."
+    except json.JSONDecodeError as e:
+        start = max(0, e.pos - 150)
+        end = min(len(candidate), e.pos + 150)
+        return (
+            f"JSONDecodeError: {e.msg} tại dòng {e.lineno}, cột {e.colno} (ký tự thứ {e.pos}/{len(candidate)}).\n"
+            f"    --- 150 ký tự TRƯỚC/SAU vị trí lỗi ---\n{candidate[start:end]!r}"
+        )
+
+
 def build_turn_prompt(task: str, variant: Optional[str], seed: dict, state: RelayState, model: str) -> str:
     """Chưa có knowledge nào parse thành công (state.latest_knowledge is None -- KHÔNG phải chỉ
     kiểm tra "turn đầu tiên", vì 1 turn có thể lỗi/không parse được, và nếu lượt SAU đó vẫn dựa
@@ -261,8 +279,7 @@ def run_turn(
                 print_fn(
                     f"[DEBUG] lượt {model} (round {round_index}, thử {attempt + 1}/{max_retries}) "
                     f"không parse được JSON -- response dài {len(response)} ký tự.\n"
-                    f"    --- 300 ký tự ĐẦU ---\n{response[:300]!r}\n"
-                    f"    --- 300 ký tự CUỐI ---\n{response[-300:]!r}"
+                    f"    {describe_json_error(response)}"
                 )
                 raise ValueError("Không parse được khối JSON hợp lệ trong response")
             vote = extract_consensus_vote(response)
