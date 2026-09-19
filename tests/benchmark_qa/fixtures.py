@@ -66,8 +66,9 @@ def write_corpus(root: Path) -> None:
     flat = [{"dataset": DATASET, "transcript": s["transcript"], "source_file": "tiny"} for s in CORPUS[DATASET]]
     with open(speech / "full_transcripts.json", "w", encoding="utf-8") as f:
         json.dump(flat, f, ensure_ascii=False, indent=2)
-    # test_speech.jsonl (dùng cho han_viet fill-fields -- id khớp source_id)
-    _write_jsonl(speech / "test_speech.jsonl", [
+    # test_speech.jsonl -- runner đọc tại <root>/Vietnamese-Speech-QA/test_speech.jsonl (khớp
+    # TEST_SPEECH_JSONL trong _lib.sh), dùng cho han_viet fill-fields (id khớp source_id).
+    _write_jsonl(root / "Vietnamese-Speech-QA" / "test_speech.jsonl", [
         {
             "id": "hv-001", "task": "speech", "split": "test", "category": "Reasoning",
             "sub-category": "Hiện tượng đặc biệt trong tiếng Việt",
@@ -88,14 +89,20 @@ def build_han_viet(root: Path) -> None:
     write_corpus(root)
     out = speech_dir(root) / "han_viet"
     out.mkdir(parents=True, exist_ok=True)
+    # answer xuất hiện verbatim trong transcript -> extract_target_word() trích được target_word
+    # (điều kiện để classify-levels gọi Gemini phân loại thay vì mặc định level 1).
     _write_jsonl(out / "han_viet_qa.jsonl", [
         {
-            "id": "hv-001", "question": 'Từ "tổ quốc" trong câu có nghĩa là gì?', "answer": "đất nước",
+            "id": "hv-001",
+            "question": "Từ Hán-Việt nào dưới đây xuất hiện trong đoạn ghi âm?",
+            "answer": "tổ quốc",
             "transcript": "chúng ta cần bảo vệ tổ quốc và giữ gìn văn hóa",
             "audio": _audio("a3.wav"), "audio_id": f"{DATASET}/a3.wav", "dataset": DATASET,
         },
         {
-            "id": "hv-002", "question": 'Từ "văn hóa" trong câu có nghĩa là gì?', "answer": "giá trị tinh thần",
+            "id": "hv-002",
+            "question": "Từ Hán-Việt nào dưới đây xuất hiện trong đoạn ghi âm?",
+            "answer": "văn hóa",
             "transcript": "chúng ta cần bảo vệ tổ quốc và giữ gìn văn hóa",
             "audio": _audio("a3.wav"), "audio_id": f"{DATASET}/a3.wav", "dataset": DATASET,
         },

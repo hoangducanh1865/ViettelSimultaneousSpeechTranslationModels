@@ -40,9 +40,10 @@ DEFAULT_MAX_WORKERS = 4
 DEFAULT_MAX_RETRIES = 3
 MAX_OUTPUT_TOKENS = 8192
 
-# Model MẠNH mặc định cho bước lọc (lấy từ hằng số dùng chung của auto_model_relay).
-DEFAULT_GEMINI_FILTER_MODEL = auto_model_relay.DEFAULT_GEMINI_MODEL
-DEFAULT_OPENAI_FILTER_MODEL = auto_model_relay.DEFAULT_OPENAI_MODEL
+# Model MẠNH mặc định cho bước lọc cuối (hằng số dùng chung của auto_model_relay, định nghĩa
+# TRONG CODE -- khác model rẻ dùng cho bước debate).
+DEFAULT_GEMINI_FILTER_MODEL = auto_model_relay.DEFAULT_GEMINI_FILTER_MODEL
+DEFAULT_OPENAI_FILTER_MODEL = auto_model_relay.DEFAULT_OPENAI_FILTER_MODEL
 
 # Field ngữ cảnh gửi kèm cho model, tuỳ task (chỉ gửi field nào record thực sự có).
 CONTEXT_FIELDS: dict[str, list[str]] = {
@@ -64,16 +65,21 @@ oan (nếu chỉ nghi ngờ mà không chứng minh được lỗi, hãy GIỮ L
 TIÊU CHÍ CHUNG (mọi task):
 1. Tự nhiên: câu hỏi đọc lên nghe tự nhiên, đúng ngữ pháp, không gượng ép/máy móc/dịch máy.
 2. Đa dạng: không lặp y hệt cấu trúc/cách hỏi của các câu khác trong cùng batch.
-3. Độ khó thực chất: đáp án KHÔNG thể suy ra nếu không nghe/hiểu nội dung; loại câu mà đáp án quá
-   hiển nhiên, hỏi kiến thức phổ thông không cần audio, hoặc đoán mò là ra.
+3. Độ khó thực chất: đáp án KHÔNG thể suy ra CHỈ bằng kiến thức phổ thông (không cần nghe audio).
+   LƯU Ý: câu hỏi nghe-hiểu bình thường vẫn PHẢI được giữ -- chỉ loại khi người không nghe audio
+   vẫn chắc chắn chọn đúng chỉ nhờ kiến thức chung/đoán mò, KHÔNG phải chỉ vì câu hỏi diễn đạt rõ
+   ràng. Không được loại câu chỉ vì đáp án "nghe có vẻ hợp lý".
 4. Nhiễu hợp lý: cả 3 phương án sai đều hợp lý, cùng loại/phạm trù với đáp án; KHÔNG có phương án
    vô lý, lạc đề, hoặc dễ loại trừ ngay; KHÔNG có phương án trùng nghĩa với đáp án đúng.
 5. Đáp án hợp lệ: "answer" PHẢI nằm trong "choices"; nếu không, loại ngay.
 6. Chỉ có MỘT đáp án đúng: nếu có từ 2 phương án trở lên cùng đúng (dù diễn đạt khác), loại.
-7. Chống lộ đáp án: câu hỏi KHÔNG được chứa nguyên văn đáp án đúng hoặc từ khoá mục tiêu (nếu có
-   context cung cấp).
-8. Chống "ăn may": loại câu mà đáp án đúng là phương án dài nhất/rõ ràng nhất/khác loại rõ rệt so
-   với 3 phương án còn lại (dấu hiệu đoán được không cần hiểu nội dung).
+7. Chống lộ đáp án: chỉ loại khi câu hỏi chứa CHÍNH XÁC NGUYÊN VĂN chuỗi "answer" (hoặc
+   "target_word" nếu có trong context) như một phần của câu hỏi. KHÔNG loại chỉ vì câu hỏi diễn
+   đạt lại/paraphrase ý của đáp án bằng từ khác, và KHÔNG loại nếu đáp án chỉ xuất hiện trong các
+   "choices" (đó là điều kiện bắt buộc, không phải lộ đáp án).
+8. Chống "ăn may": chỉ loại khi đáp án đúng là phương án dài/khác loại RÕ RỆT tới mức đoán được
+   ngay mà không cần hiểu nội dung (khác biệt độ dài quá lớn, hoặc chỉ 1 phương án đúng ngữ pháp).
+   KHÔNG loại chỉ vì đáp án tình cờ dài hơn chút ít.
 """
 
 _OUTPUT_FORMAT = """Với MỖI câu hỏi, quyết định "keep": true/false và "reason" (lý do ngắn gọn; nếu loại
@@ -90,8 +96,10 @@ Output: CHỈ trả về JSON object:
 
 _TASK_SPECIFIC: dict[str, str] = {
     "han_viet": """ĐẶC THÙ TASK HÁN VIỆT:
-- Câu hỏi KHÔNG được nhắc thẳng từ Hán-Việt mục tiêu (người nghe phải tự nhận ra qua audio); nếu
-  câu hỏi (hoặc lựa chọn) chứa chính "target_word" thì LOẠI.
+- Phần CÂU HỎI không được nhắc thẳng từ Hán-Việt mục tiêu "target_word" (người nghe phải tự nhận
+  ra qua audio) -- LOẠI nếu câu hỏi chứa chính "target_word". LƯU Ý: target_word XUẤT HIỆN trong
+  "choices" là BÌNH THƯỜNG (đáp án có thể chính là từ đó, dạng hỏi "từ nào xuất hiện"), KHÔNG loại
+  vì lý do đó.
 - Xác minh đúng cấp độ (context "level"):
   * Level 1 (1-hop): hỏi nghĩa đen; nhiễu phải là nghĩa thật khác, không đồng nghĩa.
   * Level 2 (2-hop): hỏi phạm trù/lĩnh vực SUY RA TỪ NGỮ CẢNH transcript, không phải tra nghĩa;
@@ -153,6 +161,14 @@ _TASK_SPECIFIC: dict[str, str] = {
 """,
 }
 
+
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 def build_filter_system_prompt(task: str) -> str:
     if task not in _TASK_SPECIFIC:
@@ -223,6 +239,7 @@ def filter_questions(provider_call, records: list[dict], kept_output: Path, rule
                 all_summaries.append(summary)
 
     n_kept = 0
+    _ensure_parent(kept_output)
     with open(kept_output, "w", encoding="utf-8") as f:
         for r in records:
             verdict = all_items.get(r["id"], {"keep": True, "reason": "Không có verdict (lỗi) -- mặc định giữ lại."})
@@ -233,6 +250,7 @@ def filter_questions(provider_call, records: list[dict], kept_output: Path, rule
             f.write(json.dumps(out_r, ensure_ascii=False) + "\n")
             n_kept += 1
 
+    _ensure_parent(rules_output)
     with open(rules_output, "w", encoding="utf-8") as f:
         json.dump({"criteria_summaries": all_summaries}, f, ensure_ascii=False, indent=2)
 
@@ -246,13 +264,16 @@ def _load_jsonl(path: Path) -> list[dict]:
 
 def _resolve_role_client(service_account_json, env_file, model_arg, role: str, input_path,
                          location: str = "local", base_url_override: Optional[str] = None):
-    """Ủy quyền cho auto_model_relay.resolve_role_client() (nguồn DUY NHẤT xử lý credential)."""
+    """Ủy quyền cho auto_model_relay.resolve_role_client() (nguồn DUY NHẤT xử lý credential).
+
+    Bước LỌC dùng model KHOẺ (DEFAULT_*_FILTER_MODEL) làm mặc định, khác model rẻ của debate."""
+    filter_default = DEFAULT_GEMINI_FILTER_MODEL if role.upper() == "GEMINI" else DEFAULT_OPENAI_FILTER_MODEL
     return auto_model_relay.resolve_role_client(
         role,
         service_account_json=service_account_json,
         env_file=env_file,
         location=location,
-        model=model_arg,
+        model=model_arg or filter_default,
         base_url=base_url_override,
         input_path=input_path,
     )
@@ -302,7 +323,9 @@ def main(argv: Optional[list[str]] = None) -> None:
                 )
                 model = args.model or DEFAULT_OPENAI_FILTER_MODEL
             else:
-                client, model = _resolve_role_client(None, env_file, args.model, "OPENAI", input_path, location=args.location)
+                client, model = _resolve_role_client(None, env_file, args.model, "OPENAI", input_path,
+                                                     location=args.location,
+                                                     base_url_override=args.openai_base_url)
 
         provider_call = make_provider_call(args.provider, client, model)
         system_prompt = build_filter_system_prompt(args.task)

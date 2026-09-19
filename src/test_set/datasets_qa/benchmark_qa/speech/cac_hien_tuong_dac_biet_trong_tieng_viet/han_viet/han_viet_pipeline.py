@@ -100,6 +100,14 @@ Output: CHỈ trả về JSON array cùng độ dài, mỗi phần tử {"id": <
 LEVEL_MAP = {"level_1": 1, "level_2": 2, "level_3": 3}
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def extract_target_word(r: dict) -> Optional[str]:
     """Trích từ Hán-Việt mục tiêu TRỰC TIẾP từ transcript THẬT của sample -- không suy đoán,
     không bịa. Trả None nếu không trích được (caller phải mặc định mức 1 an toàn nhất)."""
@@ -245,6 +253,10 @@ QUY TẮC BẮT BUỘC:
   hiện 3 LẦN trong input (1 lần với target_level=1, 1 lần target_level=2, 1 lần target_level=3)
   -- mỗi lần sinh ĐÚNG 1 câu hỏi CHO ĐÚNG target_level đó (không phải max_level).
 - Câu hỏi KHÔNG được nhắc thẳng tên từ Hán-Việt mục tiêu (người nghe phải tự nhận ra qua audio).
+- Câu hỏi KHÔNG được diễn giải/mô tả nghĩa của đáp án (dù bằng từ khác). Ví dụ SAI: hỏi "từ dùng để
+  chỉ đất nước... được hiểu là gì?" khi đáp án là "đất nước". Chỉ được hỏi trực tiếp ("từ Hán-Việt
+  trong đoạn audio có nghĩa là gì?") hoặc trích 1 cụm ngữ cảnh NGẮN từ transcript (trong dấu ngoặc
+  kép) để định vị từ, tuyệt đối không miêu tả nội dung đáp án.
 - Hệ thống trả lời câu hỏi CHỈ nghe được audio, KHÔNG có transcript. "transcript" trong input
   chỉ là tư liệu để BẠN suy luận -- nội dung "question" PHẢI luôn nói "đoạn audio"/"đoạn ghi âm"/
   "câu vừa nghe" (KHÔNG BAO GIỜ được dùng chữ "transcript" trong "question").
@@ -347,6 +359,7 @@ def generate_questions(
             batch_results.update(future.result())
 
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         for r in leveled_records:
             for target_level in range(1, r["max_level"] + 1):
@@ -424,6 +437,7 @@ def fill_fields(multihop_path: Path, original_path: Path) -> None:
     print(f"Đã fill đủ field cho {n_filled}/{len(multihop_records)} sample "
           f"({n_missing_original} sample không tìm thấy id gốc trong {original_path}).")
 
+    _ensure_parent(multihop_path)
     with open(multihop_path, "w", encoding="utf-8") as f:
         for r in filled_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -535,6 +549,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         with open(args.samples, encoding="utf-8") as f:
             samples = json.load(f)
         new_records = build_new_word_records(samples, list_key=args.list_key)
+        _ensure_parent(args.append_to)
         with open(args.append_to, "a", encoding="utf-8") as f:
             for r in new_records:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -552,6 +567,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             client, model, records, knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
+        _ensure_parent(args.output)
         with open(args.output, "w", encoding="utf-8") as f:
             for r in leveled:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")

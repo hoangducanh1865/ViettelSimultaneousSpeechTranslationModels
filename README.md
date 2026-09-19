@@ -98,7 +98,8 @@ cp src/test_set/datasets_qa/benchmark_qa/run/config.env.example \
 | `VIETNAMESE_SPEECH_QA_LOCAL_DIR` | không | `local_dir` tải Vietnamese-Speech-QA |
 | `HF_SPEECH_REPO` / `HF_SOUND_REPO` | không | Repo đích khi push |
 | `DEBATE_MODE` | không (mặc định `api`) | `api` (2 API tự debate) hoặc `manual` (copy-paste) |
-| `GEMINI_MODEL` / `OPENAI_MODEL` | không | Model mạnh cho debate + lọc (mặc định `gemini-3.1-pro-preview` / `cx/gpt-5.6-luna`) |
+| `GEMINI_MODEL` / `OPENAI_MODEL` | không | Override model (mặc định để CODE tự chọn: debate rẻ `ag/gemini-3.6-flash-low` / `cx/gpt-5.5`; lọc cuối khoẻ `ag/gemini-3.8-flash-high` / `cx/gpt-5.6-luna`) |
+| `GEMINI_BASE_URL` / `OPENAI_BASE_URL` | không | Override endpoint (mặc định trong code: `http://localhost:20128/v1`) |
 
 > Hai token **bắt buộc nằm trong `.env`**, không nhận qua `--hf-token/--hf-write-token`.
 
@@ -144,8 +145,8 @@ bash run/benchmark_qa.sh inspect knowledge-status
 ### 2.4 Danh sách subcommand
 
 > **Luồng chuẩn của mọi task**: `[debate --debate-mode manual|api]` → sinh câu hỏi →
-> **lọc 2 API model mạnh** (`filter_qa_pipeline.py`: Gemini `gemini-3.1-pro-preview` rồi OpenAI
-> `cx/gpt-5.6-luna`) → `finalize_qa.py` → `*_final.jsonl`. Chế độ `manual` và `api` chạy y hệt nhau
+> **lọc 2 API model mạnh** (`filter_qa_pipeline.py`: model lọc cuối, mặc định `ag/gemini-3.8-flash-high`
+> rồi `cx/gpt-5.6-luna`) → `finalize_qa.py` → `*_final.jsonl`. Chế độ `manual` và `api` chạy y hệt nhau
 > ở mọi bước sau debate. Bỏ qua lọc bằng `--skip-filter`; bước debate chỉ chạy khi `--debate` và
 > `knowledge_<task>.json` chưa có.
 
@@ -178,8 +179,8 @@ bash run/benchmark_qa.sh inspect knowledge-status
 --variant toan_bo|van|chung|all   --target speech|sound|all
 --on-missing skip|raise           --debate
 --debate-mode api|manual          (mặc định: api)
---gemini-model NAME               (mặc định: gemini-3.1-pro-preview)
---openai-model NAME               (mặc định: cx/gpt-5.6-luna)
+--gemini-model NAME               (mặc định: code tự chọn theo giai đoạn -- debate rẻ / lọc khoẻ)
+--openai-model NAME               (mặc định: code tự chọn theo giai đoạn)
 --gemini-base-url URL --openai-base-url URL --openai-api-key-file FILE --env-file FILE
 --model --batch-size --max-workers --max-retries --max-rounds --seed
 --skip-filter
@@ -203,7 +204,7 @@ bash run/benchmark_qa.sh han-viet --location drive --debate --debate-mode api
 
 # Chỉ đổi model mạnh dùng cho debate + 2 lượt lọc
 bash run/benchmark_qa.sh all --location local --debate-mode api \
-  --gemini-model gemini-3.1-pro-preview --openai-model cx/gpt-5.6-luna
+  --gemini-model ag/gemini-3.8-flash-high --openai-model cx/gpt-5.6-luna
 
 # Bỏ bước lọc (chỉ finalize), hoặc đổi cấp độ lọc
 bash run/benchmark_qa.sh tu-lay --debate --skip-filter
@@ -303,7 +304,7 @@ push lên HF**; pre-final ở lại để debug.
   (khớp token chính xác), `merge-datasets` hợp nhất với ViMed (đã có `cs_terms` xác thực) →
   `code_switching_qa.jsonl`. Sau đó debate (`auto_model_relay`, batch 24) → `classify-cs` →
   `generate-questions` (6 loại A–F) → **`filter-questions` 2 lượt** (`--gemini-model`
-  `gemini-3.1-pro-preview` rồi `--openai-model` `cx/gpt-5.6-luna`) → `finalize_qa.py` →
+  `ag/gemini-3.8-flash-high` rồi `--openai-model` `cx/gpt-5.6-luna`) → `finalize_qa.py` →
   `code_switching_openai_kept_final.jsonl`.
 - Chạy trọn luồng: `bash run/benchmark_qa.sh code-switching --location local --debate --debate-mode api`.
 
@@ -346,7 +347,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
 ```
 
-- Cần `GEMINI_API_KEY` + `OPENAI_API_KEY` (kèm `# base_url # model`) trong `<repo>/.env`, proxy
+- Cần `GEMINI_API_KEY` + `OPENAI_API_KEY` trong `<repo>/.env` (model/endpoint do code quyết định), proxy
   phải đang chạy. Thiếu key → test tự `skip`.
 - Nếu proxy dùng tên model khác mặc định, override:
   `E2E_GEMINI_MODEL=ag/gemini-3.x E2E_OPENAI_MODEL=cx/gpt-5.6-luna RUN_REAL_API=1 pytest ...`.
@@ -358,8 +359,10 @@ RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
 - **Local dùng `data/` làm data root** (thay cho `stuff/` cũ): `--location local` trỏ mọi đường dẫn
   vào `<repo>/data/...`. `noteboooks/` vẫn bị gitignore.
 - Không commit token. `.env` (gốc repo, local) và `.env` trên Drive đều bị ignore.
-- `.env` dùng format `KEY="value" # base_url # model`; cả 4 task lẫn code-switching/filter đều đọc
-  credential qua `auto_model_relay.resolve_role_client()` (Vertex service account nếu có, ngược lại
-  dùng `.env` proxy).
+- **Model + endpoint định nghĩa TRONG CODE** (`auto_model_relay.DEFAULT_*`), không đọc từ `.env`:
+  debate dùng model rẻ, lọc cuối dùng model khoẻ; base_url mặc định `http://localhost:20128/v1`.
+  `.env` chỉ cần chứa **API key** (`GEMINI_API_KEY` / `OPENAI_API_KEY`); override qua
+  `--gemini-model/--openai-model/--*-base-url` nếu cần. Cả 4 task lẫn code-switching/filter đều
+  resolve credential qua `auto_model_relay.resolve_role_client()` (Vertex service account nếu có).
 - `PYTHONPATH` được `run/_lib.sh` tự trỏ vào `<repo>/src` để import
   `test_set.datasets_qa.translate_datasets.translate_dataset`.

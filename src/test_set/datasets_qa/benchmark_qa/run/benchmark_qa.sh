@@ -172,6 +172,7 @@ _cmd_prelude() {
     parse_common "$@"
     [[ "${LOCATION}" == "drive" || "${LOCATION}" == "local" ]] || die "--location phải là drive hoặc local."
     resolve_paths
+    [[ "${DRY_RUN}" == "1" ]] || ensure_output_dirs
     _INITIALIZED=1
 }
 
@@ -389,8 +390,10 @@ cmd_debate() {
         [[ -n "$MAX_WORKERS" ]] && relay_args+=(--max-workers "$MAX_WORKERS")
     fi
     [[ -n "$MAX_RETRIES" ]] && relay_args+=(--max-retries "$MAX_RETRIES")
-    # Model MẠNH cho cả 2 vai; --model là alias override Gemini (tương thích ngược).
-    relay_args+=(--gemini-model "${MODEL:-$GEMINI_MODEL}" --openai-model "$OPENAI_MODEL")
+    # Model: để CODE tự chọn model debate (rẻ) khi không có override; --model là alias Gemini.
+    local debate_gemini="${MODEL:-$GEMINI_MODEL}"
+    [[ -n "$debate_gemini" ]] && relay_args+=(--gemini-model "$debate_gemini")
+    [[ -n "$OPENAI_MODEL" ]] && relay_args+=(--openai-model "$OPENAI_MODEL")
     [[ -n "$GEMINI_BASE_URL" ]] && relay_args+=(--gemini-base-url "$GEMINI_BASE_URL")
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
@@ -654,8 +657,10 @@ cmd_code_switching() {
     py "$MAIN_PY" debate-seed --task code_switching --location "$LOCATION"
     local rounds="${MAX_ROUNDS:-10}"
     local relay_args=(run --task code_switching --location "$LOCATION" --debate-mode "$DEBATE_MODE"
-        --max-rounds "$rounds" --batch-size "${BATCH_SIZE:-24}" --max-workers "${MAX_WORKERS:-8}"
-        --gemini-model "$GEMINI_MODEL" --openai-model "$OPENAI_MODEL")
+        --seed-json "$CS_DEBATE_SEED"
+        --max-rounds "$rounds" --batch-size "${BATCH_SIZE:-24}" --max-workers "${MAX_WORKERS:-8}")
+    [[ -n "$GEMINI_MODEL" ]] && relay_args+=(--gemini-model "$GEMINI_MODEL")
+    [[ -n "$OPENAI_MODEL" ]] && relay_args+=(--openai-model "$OPENAI_MODEL")
     [[ -n "$GEMINI_BASE_URL" ]] && relay_args+=(--gemini-base-url "$GEMINI_BASE_URL")
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
@@ -671,8 +676,10 @@ cmd_code_switching() {
         warn "bỏ qua lọc 2 API code-switching (--skip-filter) -- finalize trực tiếp."
         py "$MAIN_PY" finalize-qa --pre-final "$CS_MULTIHOP" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
     else
-        local gem_filter_args=(--provider gemini --location "$LOCATION" --gemini-model "$GEMINI_MODEL")
-        local oai_filter_args=(--provider openai --location "$LOCATION" --openai-model "$OPENAI_MODEL")
+        local gem_filter_args=(--provider gemini --location "$LOCATION")
+        local oai_filter_args=(--provider openai --location "$LOCATION")
+        [[ -n "$GEMINI_MODEL" ]] && gem_filter_args+=(--gemini-model "$GEMINI_MODEL")
+        [[ -n "$OPENAI_MODEL" ]] && oai_filter_args+=(--openai-model "$OPENAI_MODEL")
         [[ -f "$SERVICE_ACCOUNT_JSON" ]] && gem_filter_args+=(--service-account-json "$SERVICE_ACCOUNT_JSON")
         [[ -n "$GEMINI_BASE_URL" ]] && gem_filter_args+=(--gemini-base-url "$GEMINI_BASE_URL")
         [[ -n "$OPENAI_API_KEY_FILE" ]] && oai_filter_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")

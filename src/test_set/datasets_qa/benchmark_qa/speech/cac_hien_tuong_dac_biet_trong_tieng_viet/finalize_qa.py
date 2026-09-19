@@ -24,6 +24,14 @@ FINAL_FIELDS = [
 ]
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def finalize_record(record: dict, *, sub_category_override: Optional[str] = None) -> dict:
     """Chiếu record giàu field xuống ĐÚNG FINAL_FIELDS. "sub-category" ưu tiên field có gạch
     nối (tu_muon/tu_lay/phuong_ngu) trước, rồi mới rơi về "subcategory" không gạch nối (han_viet
@@ -75,6 +83,7 @@ def finalize_file(
             n_skipped += 1
             print(f"[BỎ QUA] {e}")
 
+    _ensure_parent(out_path)
     with open(out_path, "w", encoding="utf-8") as f:
         for r in finalized:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")

@@ -77,6 +77,14 @@ FIELD_KEYS = [
 _POS_LABELS = {"noun": "danh từ", "verb": "động từ", "adjective": "tính từ", "other": "từ loại khác"}
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def _audio_ref(sample: dict) -> Optional[str]:
     return sample.get("audio_filepath") or sample.get("audio")
 
@@ -409,6 +417,7 @@ def generate_questions(
 
     # Loại A: rule-based, KHÔNG gọi Gemini.
     n_written_a = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         for r in classified_records:
             qid = f"{r['id']}__A"
@@ -435,6 +444,7 @@ def generate_questions(
                 results.update(future.result())
 
         n_written = 0
+        _ensure_parent(output_path)
         with open(output_path, "a", encoding="utf-8") as f:
             for u in units:
                 gen = results.get(u["id"])
@@ -509,6 +519,7 @@ def filter_questions(
                 all_summaries.append(summary)
 
     n_kept = 0
+    _ensure_parent(kept_output)
     with open(kept_output, "w", encoding="utf-8") as f:
         for r in records:
             verdict = all_items.get(r["id"], {"keep": True, "reason": "Không có verdict (lỗi) -- mặc định giữ lại."})
@@ -519,6 +530,7 @@ def filter_questions(
             f.write(json.dumps(out_r, ensure_ascii=False) + "\n")
             n_kept += 1
 
+    _ensure_parent(rules_output)
     with open(rules_output, "w", encoding="utf-8") as f:
         json.dump({"criteria_summaries": all_summaries}, f, ensure_ascii=False, indent=2)
 
@@ -626,6 +638,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             client, model, records, kg,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
+        _ensure_parent(output)
         with open(output, "w", encoding="utf-8") as f:
             for r in out:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -663,14 +676,18 @@ def main(argv: Optional[list[str]] = None) -> None:
             service_account_json = args.service_account_json or (
                 str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not env_file else None
             )
-            client, model = _resolve_role_client(service_account_json, env_file, args.gemini_model, "GEMINI", input_path)
+            client, model = _resolve_role_client(service_account_json, env_file,
+                                                 args.gemini_model or auto_model_relay.DEFAULT_GEMINI_FILTER_MODEL,
+                                                 "GEMINI", input_path, args.location)
             provider_call = make_gemini_provider_call(client, model)
         else:
             if args.openai_api_key_file:
                 openai_client = auto_model_relay.load_openai_client(Path(args.openai_api_key_file), args.openai_base_url or auto_model_relay.DEFAULT_OPENAI_BASE_URL)
-                openai_model = args.openai_model or auto_model_relay.DEFAULT_OPENAI_MODEL
+                openai_model = args.openai_model or auto_model_relay.DEFAULT_OPENAI_FILTER_MODEL
             else:
-                openai_client, openai_model = _resolve_role_client(None, env_file, args.openai_model, "OPENAI", input_path, args.location)
+                openai_client, openai_model = _resolve_role_client(None, env_file,
+                                                                   args.openai_model or auto_model_relay.DEFAULT_OPENAI_FILTER_MODEL,
+                                                                   "OPENAI", input_path, args.location)
             provider_call = make_openai_provider_call(openai_client, openai_model)
 
         filter_questions(

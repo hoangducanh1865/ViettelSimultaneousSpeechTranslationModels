@@ -234,4 +234,7 @@ raw_audio/
 
 audio/
 *.wav
+*.flac
 tmp/
+# Thư mục scratch của test E2E (tự sinh lại mỗi lần chạy, không commit)
+data/_e2e/

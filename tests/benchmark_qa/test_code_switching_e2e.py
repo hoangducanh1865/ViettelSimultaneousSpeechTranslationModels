@@ -9,6 +9,7 @@ def test_code_switching_e2e_with_debate(e2e_root):
 
     run_dispatcher(e2e_root, ["code-switching", "--debate", "--debate-mode", "api"])
 
+    # knowledge graph ghi vào --knowledge-dir (= <e2e_root>/knowledge).
+    assert (e2e_root / "knowledge" / "knowledge_code_switching.json").exists(), "debate không sinh knowledge graph"
     cs = e2e_root / "benchmark_qa/speech/trich_xuat_thong_tin/code_switching"
-    assert (cs / "knowledge_code_switching.json").exists(), "debate không sinh knowledge graph"
     assert_valid_final(cs / "code_switching_openai_kept_final.jsonl", min_samples=1)

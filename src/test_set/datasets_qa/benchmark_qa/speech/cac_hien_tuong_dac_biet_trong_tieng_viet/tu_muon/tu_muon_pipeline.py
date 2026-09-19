@@ -104,6 +104,14 @@ Output: CHỈ trả về JSON array cùng độ dài, mỗi phần tử {"id": <
 _ID_PREFIX_RE = re.compile(r"^(tu-muon-asr-\d+)")
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def _aspect_value(aspect, ngon_ngu, tu_goc, y_nghia):
     if aspect == "ngon_ngu":
         return ngon_ngu
@@ -477,6 +485,7 @@ def generate_questions(
 
     level3_pending = []
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     out_f = open(output_path, "a", encoding="utf-8")
 
     for e in entries:
@@ -641,6 +650,7 @@ def generate(
                 llm_distractors.update(future.result())
 
     n_written = n_failed_distractor = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         for record_id, s, word, aspect, correct_choice, strategy in tqdm(prepared, desc="tu_muon build records"):
             distractor_choices = None
@@ -754,6 +764,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             client, model, samples, Path(args.csv), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
+        _ensure_parent(args.output)
         with open(args.output, "w", encoding="utf-8") as f:
             for e in entries:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")

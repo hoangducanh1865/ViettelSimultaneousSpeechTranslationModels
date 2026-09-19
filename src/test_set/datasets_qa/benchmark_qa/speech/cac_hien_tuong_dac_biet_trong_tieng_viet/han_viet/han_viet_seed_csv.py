@@ -26,6 +26,14 @@ from han_viet_pipeline import extract_target_word
 SEED_CSV_FIELDS = ["STT", "Từ Hán Việt", "Nghĩa", "Ghi Chú"]
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def build_seed_csv(han_viet_qa_path: Path, out_csv: Path) -> dict:
     with open(han_viet_qa_path, encoding="utf-8") as f:
         records = [json.loads(line) for line in f if line.strip()]
@@ -41,6 +49,7 @@ def build_seed_csv(han_viet_qa_path: Path, out_csv: Path) -> dict:
         # debate sẽ sửa lại nếu sai/chưa đủ.
         seen.setdefault(word, {"Từ Hán Việt": word, "Nghĩa": r["answer"], "Ghi Chú": f"source_id={r['id']}"})
 
+    _ensure_parent(out_csv)
     with open(out_csv, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=SEED_CSV_FIELDS)
         writer.writeheader()

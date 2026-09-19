@@ -64,6 +64,14 @@ _YES_NO_ANSWERS = {"yes", "no"}
 # Step 1: build-manifest
 # ============================================================================================
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def build_manifest(output_dir: Path) -> None:
     """Tải chỉ các file parquet của split "test" (không tải cả dataset), ghi audio .wav +
     manifest JSONL, sau đó tách sẵn thành 2 file: yes/no và non-yes/no."""
@@ -130,12 +138,14 @@ def build_manifest(output_dir: Path) -> None:
         if n_skipped_parse:
             print(f"Bỏ qua {n_skipped_parse} sample không parse được field 'text'.")
 
+        _ensure_parent(manifest_path)
         with open(manifest_path, "w", encoding="utf-8") as f:
             for r in records:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         print(f"Đã lưu {len(records)} sample (audio .wav + manifest) vào {output_dir}")
 
     non_yes_no = [r for r in records if r["answer"].strip().lower() not in _YES_NO_ANSWERS]
+    _ensure_parent(non_yesno_path)
     with open(non_yesno_path, "w", encoding="utf-8") as f:
         for r in non_yes_no:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -228,6 +238,7 @@ def filter_vn_relevance(
             futures = {executor.submit(_classify_vn_relevance_batch, client, model, b, max_retries): b for b in batches}
             for future in tqdm(as_completed(futures), total=len(futures), desc="VN-relevance ClothoAQA"):
                 cache.update(future.result())
+        _ensure_parent(cache_path)
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False)
 
@@ -241,6 +252,7 @@ def filter_vn_relevance(
     kept = [r for r in records if cache[r["id"]]["verdict"] in ("relevant", "rare_but_plausible")]
     print(f"Giữ lại: {len(kept)}/{len(records)} sample phù hợp ngữ cảnh Việt Nam.")
 
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         for r in kept:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -340,6 +352,7 @@ def translate(
 
     batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_translate_and_distract_batch, client, model, b, max_retries): b for b in batches}

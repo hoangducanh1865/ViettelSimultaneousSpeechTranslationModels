@@ -80,6 +80,14 @@ Output: CHỈ trả về JSON array cùng độ dài, mỗi phần tử {"id": <
 """
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def _classify_region_batch(client, model, batch, max_retries):
     payload = [
         {"id": r["id"], "dialect_form": r["answer"], "transcript": r.get("transcript")}
@@ -166,6 +174,7 @@ def classify_region(
         r["region_or_ethnic_group"] = res.get("region_or_ethnic_group")
         r["region_reason"] = res.get("region_reason", res.get("reason"))
 
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -253,6 +262,7 @@ def generate_questions(
 
     batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_gen_region_qa_batch, client, model, b, max_retries, system_prompt): b for b in batches}
@@ -274,6 +284,8 @@ def generate_questions(
                         "question_type": "region-1-hop",
                         "region_or_ethnic_group": r["region_or_ethnic_group"],
                         "dataset": r.get("dataset"),
+                        "task": r.get("task", "speech"),
+                        "split": r.get("split", "test"),
                         "category": r.get("category"),
                         "sub-category": r.get("sub-category"),
                         "sub-sub-category": r.get("sub-sub-category"),

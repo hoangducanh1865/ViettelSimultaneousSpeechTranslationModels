@@ -23,6 +23,14 @@ from typing import Optional
 from knowledge_graph import load_knowledge_graph
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def apply_to_csv(
     knowledge: dict, base_csv: Optional[Path], word_col: str, field_to_column: dict[str, str], out_csv: Path,
 ) -> dict:
@@ -64,6 +72,7 @@ def apply_to_csv(
         rows_by_word[word] = new_row
         stats[status] += 1
 
+    _ensure_parent(out_csv)
     with open(out_csv, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

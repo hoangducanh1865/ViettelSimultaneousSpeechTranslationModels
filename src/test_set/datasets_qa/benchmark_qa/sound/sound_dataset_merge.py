@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Optional
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def _snake_case(text: str) -> str:
     text = re.sub(r"[^\w\s]", "", text)  # bỏ dấu câu (vd "/" trong "Region / Accent")
     text = re.sub(r"\s+", "_", text.strip())
@@ -123,6 +131,7 @@ def merge(
         print(f"CẢNH BÁO: {n_missing_audio_clotho} sample ClothoAQA thiếu file audio local -- đã bỏ qua.")
     print(f"ClothoAQA: {len(merged_records) - n_before} sample đã merge.")
 
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         for r in merged_records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")

@@ -77,9 +77,22 @@ DEFAULT_MODEL_ORDER = ["gemini", "openai"]
 DEFAULT_MANUAL_MODEL_ORDER = ["gemini", "chatgpt", "claude"]
 DEFAULT_MAX_ROUNDS = 5
 DEFAULT_MAX_RETRIES = 3
-DEFAULT_GEMINI_MODEL = "gemini-3.1-pro-preview"
-DEFAULT_OPENAI_MODEL = "cx/gpt-5.6-luna"
-DEFAULT_OPENAI_BASE_URL = "https://r3wrrfi.abc-tunnel.us/v1"
+
+# --- Model + endpoint ĐỊNH NGHĨA TRONG CODE (không đọc từ .env), dùng CHUNG cho local & drive. ---
+# 2 giai đoạn dùng model khác nhau để cân bằng chất lượng/giá:
+#   * DEBATE  : model rẻ, chạy nhiều lượt/round.
+#   * FILTER  : model khoẻ hơn, chỉ chạy 1-2 lượt cuối để lọc chất lượng câu hỏi.
+# Base URL mặc định trỏ về proxy OpenAI-compatible chạy local (phục vụ cả Gemini lẫn OpenAI).
+DEFAULT_PROXY_BASE_URL = "http://localhost:20128/v1"
+# Debate (rẻ).
+DEFAULT_GEMINI_MODEL = "ag/gemini-3.6-flash-low"
+DEFAULT_OPENAI_MODEL = "cx/gpt-5.5"
+# Filter (khoẻ, vẫn kiểm soát giá).
+DEFAULT_GEMINI_FILTER_MODEL = "ag/gemini-3.8-flash-high"
+DEFAULT_OPENAI_FILTER_MODEL = "cx/gpt-5.6-luna"
+# Endpoint.
+DEFAULT_GEMINI_BASE_URL = DEFAULT_PROXY_BASE_URL
+DEFAULT_OPENAI_BASE_URL = DEFAULT_PROXY_BASE_URL
 
 _CONSENSUS_MARKER_RE = re.compile(r"CONSENSUS:\s*(FINAL|CONTINUE)", re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"```json\s*(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -90,6 +103,14 @@ _JSON_FENCE_RE = re.compile(r"```json\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _LEADING_FENCE_RE = re.compile(r"^```(?:json)?\s*", re.IGNORECASE)
 _TRAILING_FENCE_RE = re.compile(r"```\s*$")
 
+
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 @dataclass
 class Turn:
@@ -397,6 +418,7 @@ def _turn_to_dict(t: Turn) -> dict:
 
 def _write_turn_log(log_dir: Path, turn: Turn) -> None:
     path = log_dir / f"turn_{turn.turn_index:03d}_{turn.model}.json"
+    _ensure_parent(path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(_turn_to_dict(turn), f, ensure_ascii=False, indent=2)
 
@@ -414,6 +436,7 @@ def manual_turn_io(
     input_fn() (Enter khi đã dán xong, gõ SKIP để bỏ lượt nếu paste hỏng), rồi đọc response_path.
     Trả về "" nếu SKIP -- run_turn() coi đây như 1 lượt lỗi thông thường (parsed_knowledge=None,
     relay vẫn tiếp tục), không phải lỗi hệ thống."""
+    _ensure_parent(prompt_path)
     prompt_path.write_text(prompt, encoding="utf-8")
     if response_path.exists():
         response_path.unlink()
@@ -576,6 +599,7 @@ def save_state(state: RelayState, path: Path) -> None:
         "max_rounds": state.max_rounds, "stopped_reason": state.stopped_reason,
         "latest_knowledge": state.latest_knowledge, "turns": [_turn_to_dict(t) for t in state.turns],
     }
+    _ensure_parent(path)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
@@ -612,6 +636,7 @@ def export_knowledge_graph(state: RelayState, task: str, variant: Optional[str],
         "max_rounds": state.max_rounds, "stopped_reason": state.stopped_reason,
         "consensus_round": consensus_round,
     }
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(kg, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu knowledge graph vào {output_path}.")
@@ -782,6 +807,7 @@ def export_merged_knowledge_graph(
         "model_order": model_order, "max_rounds": max_rounds,
         "n_batches": len(states), "n_consensus": n_consensus,
     }
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(kg, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu knowledge graph gộp từ {len(states)} batch ({n_consensus} batch đồng thuận) vào {output_path}.")
@@ -811,6 +837,7 @@ def save_batch_states(states: list[RelayState], state_output: Path) -> None:
             for i, s in enumerate(states)
         ],
     }
+    _ensure_parent(state_output)
     with open(state_output, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)
 
@@ -842,10 +869,13 @@ def resolve_role_client(
     `model`/`base_url` truyền tay luôn thắng giá trị trong .env.
     Trả về (client, model)."""
     role = role.upper()
-    default_model = DEFAULT_GEMINI_MODEL if role == "GEMINI" else DEFAULT_OPENAI_MODEL
+    if role == "GEMINI":
+        default_model, default_base_url = DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_BASE_URL
+    else:
+        default_model, default_base_url = DEFAULT_OPENAI_MODEL, DEFAULT_OPENAI_BASE_URL
 
     if role == "GEMINI" and service_account_json:
-        return load_gemini_client(service_account_json), (model or DEFAULT_GEMINI_MODEL)
+        return load_gemini_client(service_account_json), (model or default_model)
 
     if env_file:
         env_path = Path(env_file)
@@ -856,16 +886,18 @@ def resolve_role_client(
     else:
         env_path = env_paths.credentials_env_file(location)
 
+    # Chỉ lấy API KEY từ .env -- model + base_url ĐỊNH NGHĨA TRONG CODE (có thể override qua
+    # tham số truyền tay), để không phụ thuộc cấu hình .env và dùng chung local/drive.
     env = load_env_file(env_path) if env_path.exists() else {}
     role_env = env.get(role, {})
     api_key = role_env.get("api_key")
-    resolved_base_url = base_url or role_env.get("base_url")
-    resolved_model = model or role_env.get("model") or default_model
+    resolved_base_url = base_url or default_base_url
+    resolved_model = model or default_model
 
-    if not (api_key and resolved_base_url):
+    if not api_key:
         raise ValueError(
-            f"Không tìm được {role}_API_KEY + base_url hợp lệ trong {env_path} (và role={role} "
-            f"không dùng service account) -- cần 1 trong 2 cách cấu hình credential."
+            f"Không tìm được {role}_API_KEY trong {env_path} (và role={role} không dùng service "
+            f"account) -- cần cấu hình credential."
         )
     return _make_openai_client(api_key, resolved_base_url), resolved_model
 
@@ -896,12 +928,13 @@ def resolve_clients(args) -> tuple:
     else:
         gemini_env = env.get("GEMINI", {})
         gemini_api_key = gemini_env.get("api_key")
-        gemini_base_url = args.gemini_base_url or gemini_env.get("base_url")
-        gemini_model = args.gemini_model or gemini_env.get("model") or DEFAULT_GEMINI_MODEL
-        if not (gemini_api_key and gemini_base_url):
+        # base_url + model ĐỊNH NGHĨA TRONG CODE (override được qua flag), không lấy từ .env.
+        gemini_base_url = args.gemini_base_url or DEFAULT_GEMINI_BASE_URL
+        gemini_model = args.gemini_model or DEFAULT_GEMINI_MODEL
+        if not gemini_api_key:
             raise ValueError(
-                f"Không có --gemini-service-account-json, và không tìm được GEMINI_API_KEY + "
-                f"base_url hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình Gemini."
+                f"Không có --gemini-service-account-json, và không tìm được GEMINI_API_KEY trong "
+                f"{env_path} -- truyền 1 trong 2 cách cấu hình Gemini."
             )
         gemini_client = _make_openai_client(gemini_api_key, gemini_base_url)
 
@@ -911,12 +944,12 @@ def resolve_clients(args) -> tuple:
     else:
         openai_env = env.get("OPENAI", {})
         openai_api_key = openai_env.get("api_key")
-        openai_base_url = args.openai_base_url or openai_env.get("base_url")
-        openai_model = args.openai_model or openai_env.get("model") or DEFAULT_OPENAI_MODEL
-        if not (openai_api_key and openai_base_url):
+        openai_base_url = args.openai_base_url or DEFAULT_OPENAI_BASE_URL
+        openai_model = args.openai_model or DEFAULT_OPENAI_MODEL
+        if not openai_api_key:
             raise ValueError(
-                f"Không có --openai-api-key-file, và không tìm được OPENAI_API_KEY + base_url "
-                f"hợp lệ trong {env_path} -- truyền 1 trong 2 cách cấu hình OpenAI."
+                f"Không có --openai-api-key-file, và không tìm được OPENAI_API_KEY trong {env_path} "
+                f"-- truyền 1 trong 2 cách cấu hình OpenAI."
             )
         openai_client = _make_openai_client(openai_api_key, openai_base_url)
 

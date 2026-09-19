@@ -94,6 +94,14 @@ from pathlib import Path
 from typing import Optional
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def normalize_for_match(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     return text.lower()
@@ -225,6 +233,7 @@ def filter_csv(src_csv: Path, word_col: str, corpus_normalized: str, out_csv: Pa
     kept_rows = [r for r in rows if r[word_col].strip() and word_appears_in_corpus(r[word_col].strip(), corpus_normalized)]
     print(f"Giữ lại {len(kept_rows)}/{len(rows)} dòng có xuất hiện trong transcript ASR.")
 
+    _ensure_parent(out_csv)
     with open(out_csv, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -267,6 +276,7 @@ def build_samples(
 
     print(f"Giữ lại {len(matched_samples)}/{len(all_samples)} sample có chứa ít nhất 1 từ đã lọc.")
 
+    _ensure_parent(out_json)
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(matched_samples, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu {out_json} ({len(matched_samples)} sample).")
@@ -292,6 +302,7 @@ def split_by_prefix(
           f"{len(rest_rows)} còn lại (/{len(rows)} tổng).")
 
     for path, out_rows in ((out_csv_matched, matched_rows), (out_csv_rest, rest_rows)):
+        _ensure_parent(path)
         with open(path, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -322,8 +333,10 @@ def split_by_prefix(
     print(f"Tách sample tương ứng: {len(matched_samples)} khớp, {len(rest_samples)} còn lại "
           f"(/{len(samples)} tổng).")
 
+    _ensure_parent(out_samples_matched)
     with open(out_samples_matched, "w", encoding="utf-8") as f:
         json.dump(matched_samples, f, ensure_ascii=False, indent=2)
+    _ensure_parent(out_samples_rest)
     with open(out_samples_rest, "w", encoding="utf-8") as f:
         json.dump(rest_samples, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu {out_samples_matched} ({len(matched_samples)} sample), "
@@ -357,6 +370,7 @@ def dedupe_samples(samples_path: Path, list_key: str, word_key: str, against_pat
             kept.append(new_s)
 
     print(f"Số sample còn lại sau khi loại: {len(kept)}")
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(kept, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu {output_path}.")
@@ -442,6 +456,7 @@ def build_cloze_samples(
     print(f"Giữ lại {len(matched_samples)}/{len(all_samples)} sample có từ GỐC (chưa láy) "
           f"nhưng KHÔNG có từ láy đầy đủ trong transcript.")
 
+    _ensure_parent(out_json)
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(matched_samples, f, ensure_ascii=False, indent=2)
     print(f"Đã lưu {out_json} ({len(matched_samples)} sample).")
@@ -545,6 +560,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             with open(args.csv, encoding="utf-8-sig", newline="") as f:
                 words = [r[args.word_col].strip() for r in csv.DictReader(f) if r[args.word_col].strip()]
         report = word_coverage_report(words, all_samples, corpus, max_examples_per_word=args.max_examples_per_word)
+        _ensure_parent(args.out_json)
         with open(args.out_json, "w", encoding="utf-8") as f:
             json.dump(report, f, ensure_ascii=False, indent=2)
         print(f"Đã lưu {args.out_json}.")

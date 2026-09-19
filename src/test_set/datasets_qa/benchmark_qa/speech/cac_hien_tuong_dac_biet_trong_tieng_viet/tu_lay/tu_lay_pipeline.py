@@ -68,6 +68,14 @@ _TONE_COMBINING_MARK = {"́": "sac", "̀": "huyen", "̉": "hoi", "̃": "nga", "�
 _HIGH_TONES = {"ngang", "sac", "hoi"}  # âm vực cao; huyền/nặng/ngã là âm vực thấp
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def classify_tone(syllable: str) -> str:
     """Trả về 1 trong 6 thanh điệu (ngang/sac/huyen/hoi/nga/nang) của 1 tiếng, qua NFD-decompose
     rồi tìm combining mark thanh điệu."""
@@ -621,6 +629,7 @@ def generate_questions(
 
     level3_pending = []
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     out_f = open(output_path, "a", encoding="utf-8")
 
     for e in entries:
@@ -784,6 +793,7 @@ def generate_cloze_questions(entries: list[dict], word_rows: dict, output_path: 
         print(f"Đã có sẵn {len(done_ghep_ids)} câu hỏi cloze trong {output_path} -- resume.")
 
     n_written = n_failed = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         for e in entries:
             id_ghep = f"{e['id']}__CLOZE"
@@ -944,6 +954,7 @@ def generate(
                 llm_distractors.update(future.result())
 
     n_written = n_failed_distractor = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         for record_id, s, word, aspect, correct_choice, strategy in tqdm(prepared, desc=f"tu_lay_{variant} build records"):
             distractor_choices = None
@@ -1080,6 +1091,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             client, model, args.variant, samples, Path(args.csv), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
+        _ensure_parent(args.output)
         with open(args.output, "w", encoding="utf-8") as f:
             for e in entries:
                 f.write(json.dumps(e, ensure_ascii=False) + "\n")

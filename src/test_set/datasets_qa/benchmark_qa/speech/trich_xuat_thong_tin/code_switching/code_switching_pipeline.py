@@ -68,6 +68,14 @@ DEFAULT_MAX_RETRIES = 3
 # Step 1: build-manifest
 # ============================================================================================
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def build_manifest(output_dir: Path) -> None:
     """Tải toàn bộ 3 shard parquet của ddwang2000/MMSU, lọc lại CHỈ sample có
     task_name == TASK_NAME (subset Code-switching), ghi audio .wav + manifest JSONL."""
@@ -127,6 +135,7 @@ def build_manifest(output_dir: Path) -> None:
             records.append(future.result())
 
     records.sort(key=lambda r: r["id"])
+    _ensure_parent(manifest_path)
     with open(manifest_path, "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -167,6 +176,7 @@ def build_vi_input(
             "dataset": dataset_name,
         })
 
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         for r in matched:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
@@ -268,6 +278,7 @@ def extract_terms(
 
     batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
     n_with_terms = n_without = 0
+    _ensure_parent(output_path)
     with open(output_path, "a", encoding="utf-8") as f:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {executor.submit(_extract_terms_batch, client, model, b, max_retries): b for b in batches}
@@ -305,6 +316,7 @@ def scan_dictionary(dictionary_path: Path, transcripts_path: Path, output_path: 
         records = [json.loads(line) for line in f if line.strip()]
 
     n_with_terms = 0
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as f:
         for r in records:
             tokens = r["text"].lower().split()
@@ -346,6 +358,7 @@ def merge_datasets(giga_scanned_path: Path, vimed_hard_path: Path, vimed_normal_
 
     has_terms_path = output_path.with_name(f"{output_path.stem}_has_terms{output_path.suffix}")
     n_written = n_has_terms = 0
+    _ensure_parent(output_path)
     with open(output_path, "w", encoding="utf-8") as out_f, open(has_terms_path, "w", encoding="utf-8") as has_terms_f:
         for dataset_source, path in sources:
             text_field = _DATASET_SOURCE_TEXT_FIELD[dataset_source]

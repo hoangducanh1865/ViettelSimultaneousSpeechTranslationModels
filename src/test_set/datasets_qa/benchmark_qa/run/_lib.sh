@@ -43,9 +43,10 @@ _load_env_file "${_RUN_DIR}/.env"
 : "${PYTHON:=python3}"
 : "${DEBATE_MODE:=api}"                 # api (2 API tự debate) hoặc manual (copy-paste) -- 2 chế độ chạy Y HỆT các bước sau
 : "${DRY_RUN:=0}"
-# Model MẠNH dùng cho bước debate + 2 lượt lọc (có thể override bằng flag tương ứng).
-: "${GEMINI_MODEL:=gemini-3.1-pro-preview}"
-: "${OPENAI_MODEL:=cx/gpt-5.6-luna}"
+# Model + base_url ĐỊNH NGHĨA TRONG CODE (auto_model_relay.DEFAULT_*), KHÔNG đặt default ở đây.
+# Chỉ truyền xuống pipeline khi user override qua flag (rỗng = để code tự chọn model theo vai).
+GEMINI_MODEL="${GEMINI_MODEL:-}"
+OPENAI_MODEL="${OPENAI_MODEL:-}"
 GEMINI_BASE_URL="${GEMINI_BASE_URL:-}"
 OPENAI_BASE_URL="${OPENAI_BASE_URL:-}"
 OPENAI_API_KEY_FILE="${OPENAI_API_KEY_FILE:-}"
@@ -150,6 +151,19 @@ resolve_paths() {
     CS_GEMINI_KEPT="${CODE_SWITCHING_DIR}/code_switching_gemini_kept.jsonl"
     CS_OPENAI_KEPT="${CODE_SWITCHING_DIR}/code_switching_openai_kept.jsonl"
     CS_OPENAI_KEPT_FINAL="${CODE_SWITCHING_DIR}/code_switching_openai_kept_final.jsonl"
+    CS_DEBATE_SEED="${CODE_SWITCHING_DIR}/debate_seed_code_switching.json"
+}
+
+# Tạo sẵn mọi thư mục output cần thiết (trên Drive thường đã có, nhưng máy local/fresh tmp thì
+# chưa -> ghi file sẽ FileNotFoundError nếu thiếu).
+ensure_output_dirs() {
+    mkdir -p \
+        "${KNOWLEDGE_DIR}" "${BENCHMARK_QA_SPEECH_DIR}" \
+        "${HAN_VIET_OUT_DIR}" "${PHUONG_NGU_OUT_DIR}" \
+        "${TU_MUON_FINAL_DIR}" "${TU_LAY_FINAL_DIR}" \
+        "${TU_MUON_INPUT_DIR}" "${TU_LAY_INPUT_DIR}" \
+        "${CODE_SWITCHING_DIR}" \
+        "${CLOTHO_AQA_DIR}" "${SOUND_OUT_DIR}" "${VIETNAMESE_SPEECH_QA_LOCAL_DIR}"
 }
 
 # Từ 1 file pre-final -> các đường dẫn của bước lọc 2 API + file final.

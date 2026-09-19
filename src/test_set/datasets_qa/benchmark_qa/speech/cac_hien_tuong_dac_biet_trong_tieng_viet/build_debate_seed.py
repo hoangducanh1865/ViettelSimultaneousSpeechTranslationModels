@@ -127,6 +127,14 @@ CONSENSUS_INSTRUCTIONS = (
 )
 
 
+def _ensure_parent(path):
+    """Tạo thư mục cha trước khi ghi file (local/thư mục tạm có thể chưa có sẵn như trên Drive)."""
+    from pathlib import Path as _P
+    p = _P(path)
+    if str(p.parent) and not p.parent.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
 def _load_csv_words(candidate_csv: Path, word_col: str) -> list[dict]:
     with open(candidate_csv, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -267,6 +275,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         samples_jsonl=samples_jsonl,
         extra_instructions=args.extra_instructions, max_unmatched_sample=args.max_unmatched_sample,
     )
+    _ensure_parent(out_json)
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(seed, f, ensure_ascii=False, indent=2)
     args.out_json = str(out_json)
