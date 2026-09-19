@@ -189,11 +189,15 @@ def build_payload_item(r: dict, context_fields: list[str]) -> dict:
 # =============================================================================================
 
 def make_provider_call(provider: str, client, model: str):
+    # Bước LỌC dùng pool model KHOẺ (fallback vòng tròn cùng họ nếu 1 model lỗi/hết quota).
+    pool = auto_model_relay.FILTER_GEMINI_MODELS if provider == "gemini" else auto_model_relay.FILTER_OPENAI_MODELS
+
     def _call(payload_json: str, system_prompt: str) -> str:
         return auto_model_relay.call_model(
             provider, payload_json, gemini_client=client, gemini_model=model,
             openai_client=client, openai_model=model,
             system_instruction=system_prompt, temperature=0.0, max_output_tokens=MAX_OUTPUT_TOKENS,
+            model_candidates=pool, rotation_key=f"{provider}:filter",
         )
 
     return _call

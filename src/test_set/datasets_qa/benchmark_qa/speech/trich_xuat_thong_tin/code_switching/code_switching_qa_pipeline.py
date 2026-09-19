@@ -542,6 +542,7 @@ def make_gemini_provider_call(client, model: str):
         return auto_model_relay.call_model(
             "gemini", payload_json, gemini_client=client, gemini_model=model,
             system_instruction=FILTER_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=8192,
+            model_candidates=auto_model_relay.FILTER_GEMINI_MODELS, rotation_key="gemini:filter",
         )
 
     return _call
@@ -552,6 +553,7 @@ def make_openai_provider_call(openai_client, model: str):
         return auto_model_relay.call_model(
             "openai", payload_json, openai_client=openai_client, openai_model=model,
             system_instruction=FILTER_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=8192,
+            model_candidates=auto_model_relay.FILTER_OPENAI_MODELS, rotation_key="openai:filter",
         )
 
     return _call

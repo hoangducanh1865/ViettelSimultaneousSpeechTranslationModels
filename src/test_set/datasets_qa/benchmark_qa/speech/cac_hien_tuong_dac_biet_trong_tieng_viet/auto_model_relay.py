@@ -61,6 +61,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -93,6 +94,58 @@ DEFAULT_OPENAI_FILTER_MODEL = "cx/gpt-5.6-luna"
 # Endpoint.
 DEFAULT_GEMINI_BASE_URL = DEFAULT_PROXY_BASE_URL
 DEFAULT_OPENAI_BASE_URL = DEFAULT_PROXY_BASE_URL
+
+# =============================================================================================
+# FALLBACK model dạng VÒNG TRÒN (cùng họ): khi 1 model lỗi (vd hết quota), tự nhảy sang model
+# khác CÙNG HỌ trong pool; con trỏ xoay vòng nên model từng lỗi vẫn được thử lại sau (có thể đã
+# hồi phục). Danh sách provider/model định nghĩa TRONG CODE (mở rộng bằng cách thêm entry).
+# =============================================================================================
+MODEL_PROVIDERS: dict[str, dict[str, list[str]]] = {
+    "Cline": {"OpenAI": ["cl/openai/gpt-5.4", "cl/openai/gpt-5.6-luna", "cl/openai/gpt-5.5"]},
+    # Provider khác (base_url/key riêng) thêm sau; hiện tất cả đều phục vụ qua cùng proxy.
+}
+# Pool theo VAI + GIAI ĐOẠN (phần tử đầu là model ưu tiên).
+DEBATE_OPENAI_MODELS = [DEFAULT_OPENAI_MODEL, *MODEL_PROVIDERS["Cline"]["OpenAI"]]
+FILTER_OPENAI_MODELS = [DEFAULT_OPENAI_FILTER_MODEL, *MODEL_PROVIDERS["Cline"]["OpenAI"]]
+DEBATE_GEMINI_MODELS = ["ag/gemini-3.6-flash-low", "ag/gemini-3.7-flash-low", "ag/gemini-3.8-flash-low"]
+FILTER_GEMINI_MODELS = ["ag/gemini-3.8-flash-high", "ag/gemini-3.8-flash-medium", "ag/gemini-3.8-flash-low"]
+# Fallback khi dùng Vertex AI service account (tên model Vertex, khác prefix proxy).
+VERTEX_GEMINI_MODELS = ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"]
+
+_PROXY_PREFIXES = ("ag/", "cl/", "cx/", "cc/")
+_MODEL_ROTATION: dict[str, int] = {}
+_MODEL_ROTATION_LOCK = threading.Lock()
+
+
+def _next_rotation(key: str, n: int) -> int:
+    with _MODEL_ROTATION_LOCK:
+        return _MODEL_ROTATION.get(key, 0) % max(n, 1)
+
+
+def _set_rotation(key: str, idx: int, n: int) -> None:
+    with _MODEL_ROTATION_LOCK:
+        _MODEL_ROTATION[key] = idx % max(n, 1)
+
+
+def _effective_candidates(model_name: str, client, base_model: Optional[str],
+                          model_candidates: Optional[list[str]]) -> list[str]:
+    """Trả về danh sách model theo thứ tự thử (đã dedupe). Tự chọn pool theo vai nếu không truyền.
+    Vertex client -> loại bỏ tên model kiểu proxy (ag/cl/cx/cc)."""
+    if model_candidates:
+        cands = list(dict.fromkeys(m for m in model_candidates if m))
+    elif model_name == "gemini":
+        cands = list(DEBATE_GEMINI_MODELS)
+    else:
+        cands = list(DEBATE_OPENAI_MODELS)
+
+    if base_model and base_model not in cands:
+        cands = [base_model, *cands]
+
+    is_vertex = (model_name == "gemini" and client is not None and not _is_openai_style_client(client))
+    if is_vertex:
+        vertex_ok = [c for c in cands if not c.startswith(_PROXY_PREFIXES)]
+        cands = vertex_ok or list(VERTEX_GEMINI_MODELS)
+    return cands
 
 _CONSENSUS_MARKER_RE = re.compile(r"CONSENSUS:\s*(FINAL|CONTINUE)", re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"```json\s*(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -361,28 +414,12 @@ def _is_openai_style_client(client) -> bool:
     return hasattr(client, "chat") and hasattr(client.chat, "completions")
 
 
-def call_model(
-    model_name: str, prompt: str, *,
-    gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
-    openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
+def _call_model_once(
+    model_name: str, model: str, prompt: str, *, client,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     system_instruction: Optional[str] = None, temperature: float = 0.7,
 ) -> str:
-    """model_name == "gemini" -> dùng gemini_client/gemini_model; NGƯỢC LẠI (mọi tên khác, ví dụ
-    "openai") -> dùng openai_client/openai_model. Client THẬT SỰ gọi ra sao (Vertex AI SDK hay
-    OpenAI-compatible HTTP) được TỰ NHẬN DIỆN qua _is_openai_style_client() -- KHÔNG cần biết
-    trước đang chạy Colab (Vertex service account) hay local (.env, kể cả Gemini qua 1 proxy local
-    nói giao thức OpenAI) -- chỉ cần đưa ĐÚNG loại client object vào, code tự xử lý đúng cách.
-    Hàm dùng chung cho CẢ debate relay (không system_instruction, prompt tự chứa mọi thứ) LẪN các
-    pipeline khác (Code-switching classify-cs/generate-questions/filter-questions) muốn tách
-    system prompt riêng, giống hệt cách các pipeline Hán Việt/Từ mượn/... vẫn dùng system prompt.
-
-    max_output_tokens mặc định CAO (mỗi lượt phải trả về TOÀN BỘ knowledge graph của cả batch,
-    không phải diff -- batch càng lớn/càng nhiều field thì response càng dài; response bị cắt
-    cụt giữa chừng sẽ KHÔNG parse được JSON, gây lỗi "Không parse được khối JSON hợp lệ")."""
-    client = gemini_client if model_name == "gemini" else openai_client
-    model = gemini_model if model_name == "gemini" else openai_model
-
+    """Gọi ĐÚNG 1 model (không fallback). Client tự nhận diện Vertex vs OpenAI-compatible."""
     if _is_openai_style_client(client):
         messages = []
         if system_instruction:
@@ -397,8 +434,8 @@ def call_model(
     if model_name == "gemini":
         from google.genai import types
 
-        response = gemini_client.models.generate_content(
-            model=gemini_model, contents=prompt,
+        response = client.models.generate_content(
+            model=model, contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=temperature, max_output_tokens=max_output_tokens,
                 system_instruction=system_instruction,
@@ -410,6 +447,56 @@ def call_model(
         f"Client cho model_name={model_name!r} không phải Vertex AI genai.Client cũng không "
         "phải OpenAI-compatible client -- không biết cách gọi."
     )
+
+
+def call_model(
+    model_name: str, prompt: str, *,
+    gemini_client=None, gemini_model: str = DEFAULT_GEMINI_MODEL,
+    openai_client=None, openai_model: str = DEFAULT_OPENAI_MODEL,
+    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+    system_instruction: Optional[str] = None, temperature: float = 0.7,
+    model_candidates: Optional[list[str]] = None, rotation_key: Optional[str] = None,
+    log_fn: Callable[[str], None] = print,
+) -> str:
+    """model_name == "gemini" -> dùng gemini_client; NGƯỢC LẠI (ví dụ "openai") -> dùng
+    openai_client. Client tự nhận diện Vertex vs OpenAI-compatible qua _is_openai_style_client().
+
+    FALLBACK dạng VÒNG TRÒN (cùng họ): thử lần lượt các model trong pool, model nào lỗi thì nhảy
+    sang model kế; thành công thì GIỮ model đó cho lần sau; nếu CẢ pool đều lỗi trong lần gọi này
+    thì tiến con trỏ 1 bước (lần sau bắt đầu ở model khác, phòng model đã hồi phục) và raise để
+    tầng trên retry. `model_candidates` để caller chọn pool theo giai đoạn (debate rẻ / lọc khoẻ);
+    mặc định dùng pool debate của vai. `rotation_key` tách con trỏ xoay theo vai+giai đoạn.
+
+    max_output_tokens mặc định CAO (mỗi lượt debate phải trả về TOÀN BỘ knowledge graph)."""
+    client = gemini_client if model_name == "gemini" else openai_client
+    base_model = gemini_model if model_name == "gemini" else openai_model
+    candidates = _effective_candidates(model_name, client, base_model, model_candidates)
+    key = rotation_key or f"{model_name}:default"
+    n = len(candidates)
+
+    start = _next_rotation(key, n)
+    last_error: Optional[Exception] = None
+    for offset in range(n):
+        idx = (start + offset) % n
+        model = candidates[idx]
+        try:
+            out = _call_model_once(
+                model_name, model, prompt, client=client,
+                max_output_tokens=max_output_tokens,
+                system_instruction=system_instruction, temperature=temperature,
+            )
+            _set_rotation(key, idx, n)  # giữ model vừa chạy thành công
+            return out
+        except Exception as e:  # noqa: BLE001
+            last_error = e
+            nxt = candidates[(idx + 1) % n]
+            log_fn(f"[FALLBACK] {model_name}: {model} lỗi ({type(e).__name__}: {str(e)[:120]}) "
+                   f"-> thử {nxt}")
+            continue
+
+    # Cả pool đều lỗi: tiến con trỏ 1 bước cho lần retry sau rồi raise.
+    _set_rotation(key, start + 1, n)
+    raise last_error if last_error else RuntimeError("Không có model nào để gọi.")
 
 
 def _turn_to_dict(t: Turn) -> dict:
@@ -499,6 +586,9 @@ def run_turn(
                 model, prompt, gemini_client=gemini_client, gemini_model=gemini_model,
                 openai_client=openai_client, openai_model=openai_model,
                 max_output_tokens=max_output_tokens,
+                model_candidates=(DEBATE_GEMINI_MODELS if model == "gemini" else DEBATE_OPENAI_MODELS),
+                rotation_key=f"{model}:debate",
+                log_fn=print_fn,
             )
             last_response = response
             parsed = extract_knowledge_json(response)
@@ -727,7 +817,7 @@ def run_relay_batched(
     # "[DEBUG]") + 1 thanh progress bar theo SỐ BATCH đã xong (dễ theo dõi tiến độ thật hơn nhiều
     # so với log thô). Người gọi vẫn có thể truyền print_fn khác để giữ nguyên log chi tiết.
     def _filtered_print_fn(msg: str) -> None:
-        if msg.startswith(("[LỖI]", "[DEBUG]", ">>>")):
+        if msg.startswith(("[LỖI]", "[DEBUG]", "[FALLBACK]", ">>>")):
             print_fn(msg)
 
     def _run_one(i: int, batch_seed: dict) -> RelayState:

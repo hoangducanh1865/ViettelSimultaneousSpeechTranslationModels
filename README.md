@@ -364,5 +364,11 @@ RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
   `.env` chỉ cần chứa **API key** (`GEMINI_API_KEY` / `OPENAI_API_KEY`); override qua
   `--gemini-model/--openai-model/--*-base-url` nếu cần. Cả 4 task lẫn code-switching/filter đều
   resolve credential qua `auto_model_relay.resolve_role_client()` (Vertex service account nếu có).
+- **Fallback model dạng vòng tròn** (`auto_model_relay.call_model`): khi 1 model lỗi (vd hết quota
+  429), tự nhảy sang model khác **cùng họ** trong pool. Pool theo giai đoạn: debate rẻ
+  (`DEBATE_*_MODELS`) / lọc cuối khoẻ (`FILTER_*_MODELS`); danh sách nằm trong
+  `MODEL_PROVIDERS` (provider "Cline" → `cl/openai/gpt-5.4|gpt-5.6-luna|gpt-5.5`). Con trỏ xoay
+  vòng nên model từng lỗi vẫn được thử lại sau; nếu CẢ pool lỗi thì raise để tầng trên retry.
+  Log có dòng `[FALLBACK] <vai>: <model lỗi> -> thử <model kế>`.
 - `PYTHONPATH` được `run/_lib.sh` tự trỏ vào `<repo>/src` để import
   `test_set.datasets_qa.translate_datasets.translate_dataset`.
