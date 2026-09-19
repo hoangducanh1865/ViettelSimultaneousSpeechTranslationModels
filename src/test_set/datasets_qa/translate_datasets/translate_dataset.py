@@ -532,7 +532,3 @@ def main(argv: Optional[list[str]] = None) -> None:
         max_retries=args.max_retries, force=args.force,
     )
     print("Totals:", stats)
-
-
-if __name__ == "__main__":
-    main()

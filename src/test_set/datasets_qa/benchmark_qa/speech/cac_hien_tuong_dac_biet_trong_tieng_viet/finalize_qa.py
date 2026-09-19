@@ -96,7 +96,3 @@ def main(argv: Optional[list[str]] = None) -> None:
         Path(args.pre_final), Path(args.final),
         on_missing=args.on_missing, sub_category_override=args.sub_category_override,
     )
-
-
-if __name__ == "__main__":
-    main()

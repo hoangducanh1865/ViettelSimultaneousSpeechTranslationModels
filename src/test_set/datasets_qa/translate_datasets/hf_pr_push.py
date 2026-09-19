@@ -74,7 +74,3 @@ def main(argv: Optional[list[str]] = None) -> None:
         file_pairs.append((local_path, path_in_repo))
 
     push_files(args.token, args.repo_id, file_pairs, repo_type=args.repo_type, commit_message=args.commit_message)
-
-
-if __name__ == "__main__":
-    main()

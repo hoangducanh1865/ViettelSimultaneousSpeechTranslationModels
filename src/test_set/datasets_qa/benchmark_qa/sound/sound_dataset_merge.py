@@ -147,7 +147,3 @@ def main(argv: Optional[list[str]] = None) -> None:
         Path(args.clotho_manifest), Path(args.clotho_audio_dir),
         Path(args.sound_out_dir), Path(args.output),
     )
-
-
-if __name__ == "__main__":
-    main()

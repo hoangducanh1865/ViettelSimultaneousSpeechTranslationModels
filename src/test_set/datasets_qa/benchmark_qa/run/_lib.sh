@@ -69,9 +69,9 @@ resolve_paths() {
     TU_MUON_SRC_DIR="${HIEN_TUONG_SRC_DIR}/tu_muon"
     TU_LAY_SRC_DIR="${HIEN_TUONG_SRC_DIR}/tu_lay"
     CODE_SWITCHING_SRC_DIR="${BENCHMARK_QA_SRC_DIR}/speech/trich_xuat_thong_tin/code_switching"
-    FILTER_QA_PIPELINE="${HIEN_TUONG_SRC_DIR}/filter_qa_pipeline.py"
     TOOLS_DIR="${BENCHMARK_QA_SRC_DIR}/tools"
-    HF_PR_PUSH="${TRANSLATE_DATASETS_SRC_DIR}/hf_pr_push.py"
+    # Entrypoint DUY NHẤT: mọi script benchmark_qa được gọi qua dispatcher này.
+    MAIN_PY="${SRC_DIR}/main.py"
 
     # PYTHONPATH trỏ vào src/ để `from test_set.datasets_qa...` import được.
     export PYTHONPATH="${SRC_DIR}${PYTHONPATH:+:${PYTHONPATH}}"

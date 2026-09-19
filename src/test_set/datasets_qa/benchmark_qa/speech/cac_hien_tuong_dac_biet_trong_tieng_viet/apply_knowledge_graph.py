@@ -87,7 +87,3 @@ def main(argv: Optional[list[str]] = None) -> None:
     knowledge = load_knowledge_graph(Path(args.knowledge_json))
     field_map = json.loads(args.field_map)
     apply_to_csv(knowledge, Path(args.base_csv) if args.base_csv else None, args.word_col, field_map, Path(args.out_csv))
-
-
-if __name__ == "__main__":
-    main()

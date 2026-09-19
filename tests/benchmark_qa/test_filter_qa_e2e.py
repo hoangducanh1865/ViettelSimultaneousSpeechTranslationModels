@@ -10,10 +10,7 @@ def test_filter_qa_pipeline_e2e(e2e_root):
     require_real_api()
     import subprocess
 
-    pipeline = (
-        REPO / "src/test_set/datasets_qa/benchmark_qa/speech/"
-        "cac_hien_tuong_dac_biet_trong_tieng_viet/filter_qa_pipeline.py"
-    )
+    main_py = REPO / "src/main.py"
     pre_final = e2e_root / "pre_final.jsonl"
     with open(pre_final, "w", encoding="utf-8") as f:
         f.write(json.dumps({
@@ -25,7 +22,7 @@ def test_filter_qa_pipeline_e2e(e2e_root):
     kept = e2e_root / "kept.jsonl"
     rules = e2e_root / "rules.json"
     cmd = [
-        str(PYTHON), str(pipeline), "filter-qa",
+        str(PYTHON), str(main_py), "filter-qa", "filter-qa",
         "--task", "tu_lay", "--pre-final", str(pre_final),
         "--kept-output", str(kept), "--rules-output", str(rules),
         "--provider", "gemini", "--location", "local", "--env-file", str(ENV_FILE),

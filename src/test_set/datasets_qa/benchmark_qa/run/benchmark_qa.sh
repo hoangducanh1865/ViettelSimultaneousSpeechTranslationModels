@@ -204,7 +204,7 @@ finalize_file() {
     local pre="$1"
     [[ -f "$pre" ]] || { warn "bỏ qua finalize (không có file): $pre"; return 0; }
     local final="${pre%.jsonl}_final.jsonl"
-    py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$pre" --final "$final" --on-missing "$ON_MISSING"
+    py "$MAIN_PY" finalize-qa --pre-final "$pre" --final "$final" --on-missing "$ON_MISSING"
 }
 
 # Chạy debate (manual|api) trước khi sinh câu hỏi, nếu --debate/--with-debate được bật.
@@ -277,14 +277,14 @@ run_filter_2api() {
     fi
     filtered_paths "$pre" "$final"
     _filter_provider_args gemini
-    py "$FILTER_QA_PIPELINE" filter-qa --task "$task" \
+    py "$MAIN_PY" filter-qa filter-qa --task "$task" \
         --pre-final "$pre" --kept-output "$FILTER_GEM_JSONL" --rules-output "$FILTER_GEM_RULES" \
         "${FILTER_ARGS[@]}"
     _filter_provider_args openai
-    py "$FILTER_QA_PIPELINE" filter-qa --task "$task" \
+    py "$MAIN_PY" filter-qa filter-qa --task "$task" \
         --pre-final "$FILTER_GEM_JSONL" --kept-output "$FILTER_OAI_JSONL" --rules-output "$FILTER_OAI_RULES" \
         "${FILTER_ARGS[@]}"
-    py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$FILTER_OAI_JSONL" --final "$final" --on-missing "$ON_MISSING"
+    py "$MAIN_PY" finalize-qa --pre-final "$FILTER_OAI_JSONL" --final "$final" --on-missing "$ON_MISSING"
 }
 
 # =============================================================================================
@@ -297,7 +297,7 @@ cmd_fetch_speech() {
     if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
         audio_args=("${EXTRA_ARGS[@]}")
     fi
-    py "${TOOLS_DIR}/fetch_datasets.py" speech \
+    py "$MAIN_PY" fetch-datasets speech \
         --repo-id "$HF_SPEECH_REPO" \
         --local-dir "$VIETNAMESE_SPEECH_QA_LOCAL_DIR" \
         --token "$HF_TOKEN" \
@@ -307,7 +307,7 @@ cmd_fetch_speech() {
 cmd_fetch_speech_zip() {
     _cmd_prelude "$@"
     require_hf_read_token
-    py "${TOOLS_DIR}/fetch_datasets.py" speech-zip \
+    py "$MAIN_PY" fetch-datasets speech-zip \
         --repo-id "$HF_SPEECH_REPO" \
         --local-dir "$VIETNAMESE_SPEECH_QA_LOCAL_DIR" \
         --token "$HF_TOKEN"
@@ -323,17 +323,17 @@ cmd_sound() {
     sa="$(gemini_service_account_arg)"
     [[ -n "$sa" || "${DRY_RUN}" == "1" ]] || die "sound cần service account Gemini (Vertex) tại ${SERVICE_ACCOUNT_JSON}."
 
-    py "${SOUND_SRC_DIR}/clotho_aqa_pipeline.py" build-manifest --output-dir "$CLOTHO_AQA_DIR"
-    py "${SOUND_SRC_DIR}/clotho_aqa_pipeline.py" filter-vn-relevance \
+    py "$MAIN_PY" clotho-aqa build-manifest --output-dir "$CLOTHO_AQA_DIR"
+    py "$MAIN_PY" clotho-aqa filter-vn-relevance \
         --service-account-json "$sa" \
         --input "$CLOTHO_AQA_NON_YESNO_MANIFEST" \
         --cache "$CLOTHO_AQA_VN_FILTER_CACHE" \
         --output "$CLOTHO_AQA_VN_MANIFEST"
-    py "${SOUND_SRC_DIR}/clotho_aqa_pipeline.py" translate \
+    py "$MAIN_PY" clotho-aqa translate \
         --service-account-json "$sa" \
         --input "$CLOTHO_AQA_VN_MANIFEST" \
         --output "$CLOTHO_AQA_VI_QA_OUTPUT"
-    py "${SOUND_SRC_DIR}/sound_dataset_merge.py" \
+    py "$MAIN_PY" sound-merge \
         --mmau-manifest "$MMAU_TEST_MINI_PATH" \
         --mmau-audio-dir "$MMAU_TEST_MINI_AUDIO_DIR" \
         --clotho-manifest "$CLOTHO_AQA_VI_QA_OUTPUT" \
@@ -345,7 +345,7 @@ cmd_sound() {
         require_hf_write_token
         local zip_base="${SOUND_ZIP_PATH%.zip}"
         py -c 'import shutil,sys; shutil.make_archive(sys.argv[1], "zip", root_dir=sys.argv[2])' "$zip_base" "$SOUND_OUT_DIR"
-        py "$HF_PR_PUSH" \
+        py "$MAIN_PY" hf-pr-push \
             --token "$HF_WRITE_TOKEN" \
             --repo-id "$HF_SOUND_REPO" \
             --file "${TEST_SOUND_MANIFEST_PATH}=test_sound.jsonl" \
@@ -369,7 +369,7 @@ cmd_debate() {
     local seed_args=(--task "$TASK" --location "$LOCATION" --out-json "$seed_json")
     [[ -n "$VARIANT" ]] && seed_args+=(--variant "$VARIANT")
     [[ ${#EXTRA_ARGS[@]} -gt 0 ]] && seed_args+=("${EXTRA_ARGS[@]}")
-    py "${HIEN_TUONG_SRC_DIR}/build_debate_seed.py" "${seed_args[@]}"
+    py "$MAIN_PY" debate-seed "${seed_args[@]}"
 
     local relay_args=(run --task "$TASK" --location "$LOCATION" --debate-mode "$DEBATE_MODE"
         --seed-json "$seed_json" --knowledge-output "$kg_json")
@@ -396,7 +396,7 @@ cmd_debate() {
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
     [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
 
-    py "${HIEN_TUONG_SRC_DIR}/auto_model_relay.py" "${relay_args[@]}"
+    py "$MAIN_PY" relay "${relay_args[@]}"
 }
 
 # =============================================================================================
@@ -411,8 +411,8 @@ cmd_han_viet() {
     set_gemini_args
 
     # Bước 0: seed CSV + báo cáo độ phủ
-    py "${HAN_VIET_SRC_DIR}/han_viet_seed_csv.py" --input "$HAN_VIET_INPUT_PATH" --out-csv "$HAN_VIET_SEED_CSV"
-    py "${HIEN_TUONG_SRC_DIR}/hien_tuong_filter_pipeline.py" word-coverage-report \
+    py "$MAIN_PY" han-viet-seed --input "$HAN_VIET_INPUT_PATH" --out-csv "$HAN_VIET_SEED_CSV"
+    py "$MAIN_PY" hien-tuong word-coverage-report \
         --csv "$HAN_VIET_SEED_CSV" --word-col "Từ Hán Việt" \
         --full-transcripts-json "$FULL_TRANSCRIPTS_JSON_PATH" \
         --out-json "$HAN_VIET_COVERAGE_REPORT"
@@ -425,7 +425,7 @@ cmd_han_viet() {
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- classify/generate chạy không KG."; fi
 
     # Bước 1: phân loại mức độ
-    py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" classify-levels \
+    py "$MAIN_PY" han-viet classify-levels \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$HAN_VIET_INPUT_PATH" \
         --output "$HAN_VIET_DIFFICULTY_OUTPUT" \
@@ -433,17 +433,17 @@ cmd_han_viet() {
 
     # Bước 2: xuất CSV cuối từ knowledge graph + tìm sample cho từ MỚI + ghép record
     if [[ -f "$kg" ]]; then
-        py "${HIEN_TUONG_SRC_DIR}/apply_knowledge_graph.py" \
+        py "$MAIN_PY" apply-kg \
             --knowledge-json "$kg" \
             --base-csv "$HAN_VIET_SEED_CSV" --word-col "Từ Hán Việt" \
             --field-map "$HAN_VIET_FIELD_MAP" \
             --out-csv "$HAN_VIET_FINAL_CSV"
-        py "${HIEN_TUONG_SRC_DIR}/hien_tuong_filter_pipeline.py" build-samples \
+        py "$MAIN_PY" hien-tuong build-samples \
             --csv "$HAN_VIET_FINAL_CSV" --word-col "Từ Hán Việt" \
             --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
             --metadata-cols "$HAN_VIET_METADATA_COLS" \
             --list-key han_viet_xuat_hien --out-json "$HAN_VIET_NEW_WORD_SAMPLES"
-        py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" build-new-word-records \
+        py "$MAIN_PY" han-viet build-new-word-records \
             --samples "$HAN_VIET_NEW_WORD_SAMPLES" --list-key han_viet_xuat_hien \
             --append-to "$HAN_VIET_DIFFICULTY_OUTPUT"
     else
@@ -451,13 +451,13 @@ cmd_han_viet() {
     fi
 
     # Bước 3: sinh câu hỏi + join field gốc
-    py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" generate-questions \
+    py "$MAIN_PY" han-viet generate-questions \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$HAN_VIET_DIFFICULTY_OUTPUT" \
         --output "$HAN_VIET_MULTIHOP_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
     require_file "$TEST_SPEECH_JSONL" "test_speech.jsonl (chạy fetch-speech trước)"
-    py "${HAN_VIET_SRC_DIR}/han_viet_pipeline.py" fill-fields \
+    py "$MAIN_PY" han-viet fill-fields \
         --multihop "$HAN_VIET_MULTIHOP_OUTPUT" \
         --original "$TEST_SPEECH_JSONL"
 
@@ -475,12 +475,12 @@ cmd_phuong_ngu() {
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
-    py "${PHUONG_NGU_SRC_DIR}/phuong_ngu_pipeline.py" classify-region \
+    py "$MAIN_PY" phuong-ngu classify-region \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$PHUONG_NGU_INPUT_PATH" \
         --output "$PHUONG_NGU_REGION_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
-    py "${PHUONG_NGU_SRC_DIR}/phuong_ngu_pipeline.py" generate-questions \
+    py "$MAIN_PY" phuong-ngu generate-questions \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$PHUONG_NGU_REGION_OUTPUT" \
         --output "$PHUONG_NGU_QA_OUTPUT" \
@@ -500,13 +500,13 @@ cmd_tu_muon() {
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
-    py "${TU_MUON_SRC_DIR}/tu_muon_pipeline.py" classify-levels \
+    py "$MAIN_PY" tu-muon classify-levels \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --samples "$TU_MUON_SAMPLES_PATH" \
         --csv "$TU_MUON_CSV_PATH" \
         --output "$TU_MUON_DIFFICULTY_OUTPUT" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
-    py "${TU_MUON_SRC_DIR}/tu_muon_pipeline.py" generate-questions \
+    py "$MAIN_PY" tu-muon generate-questions \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$TU_MUON_DIFFICULTY_OUTPUT" \
         --csv "$TU_MUON_CSV_PATH" \
@@ -529,13 +529,13 @@ cmd_tu_lay_variant() {
     local knowledge_args=()
     if [[ -f "$kg" ]]; then knowledge_args=(--knowledge-json "$kg"); else warn "chưa có $kg -- chạy không KG."; fi
 
-    py "${TU_LAY_SRC_DIR}/tu_lay_pipeline.py" classify-levels --variant "$variant" \
+    py "$MAIN_PY" tu-lay classify-levels --variant "$variant" \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --samples "$TU_LAY_VARIANT_SAMPLES" \
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$TU_LAY_VARIANT_DIFFICULTY" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
-    py "${TU_LAY_SRC_DIR}/tu_lay_pipeline.py" generate-questions --variant "$variant" \
+    py "$MAIN_PY" tu-lay generate-questions --variant "$variant" \
         "${GEMINI_COMMON[@]}" "${GEMINI_SA[@]}" \
         --input "$TU_LAY_VARIANT_DIFFICULTY" \
         --csv "$TU_LAY_VARIANT_CSV" \
@@ -551,11 +551,11 @@ cmd_tu_lay_cloze() {
     TU_LAY_CLOZE_SAMPLES="${TU_LAY_FINAL_DIR}/asr_samples_with_tu_lay_toan_bo_cloze.json"
     local cloze_output="${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa.jsonl"
 
-    py "${HIEN_TUONG_SRC_DIR}/hien_tuong_filter_pipeline.py" build-cloze-samples \
+    py "$MAIN_PY" hien-tuong build-cloze-samples \
         --csv "$TU_LAY_VARIANT_CSV" --word-col "Từ láy" --base-word-col "Từ gốc (cơ sở)" \
         --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
         --list-key tu_lay_cloze_candidate --out-json "$TU_LAY_CLOZE_SAMPLES"
-    py "${TU_LAY_SRC_DIR}/tu_lay_pipeline.py" generate-cloze-questions \
+    py "$MAIN_PY" tu-lay generate-cloze-questions \
         --samples "$TU_LAY_CLOZE_SAMPLES" \
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$cloze_output"
@@ -608,7 +608,7 @@ cmd_push_hf() {
 
     if [[ "$target" == "speech" || "$target" == "all" ]]; then
         local prefix="speech/cac_hien_tuong_dac_biet_trong_tieng_viet"
-        py "$HF_PR_PUSH" \
+        py "$MAIN_PY" hf-pr-push \
             --token "$HF_WRITE_TOKEN" \
             --repo-id "$HF_SPEECH_REPO" \
             --file "${HAN_VIET_FINAL_QA}=${prefix}/han_viet/han_viet_multihop_qa_final.jsonl" \
@@ -622,7 +622,7 @@ cmd_push_hf() {
     fi
 
     if [[ "$target" == "sound" || "$target" == "all" ]]; then
-        py "$HF_PR_PUSH" \
+        py "$MAIN_PY" hf-pr-push \
             --token "$HF_WRITE_TOKEN" \
             --repo-id "$HF_SOUND_REPO" \
             --file "${TEST_SOUND_MANIFEST_PATH}=test_sound.jsonl" \
@@ -638,22 +638,20 @@ cmd_code_switching_mmsu() {
     _cmd_prelude "$@"
     local sa_args=()
     [[ -f "$SERVICE_ACCOUNT_JSON" ]] && sa_args=(--service-account-json "$SERVICE_ACCOUNT_JSON")
-    py "${CODE_SWITCHING_SRC_DIR}/code_switching_pipeline.py" build-manifest \
+    py "$MAIN_PY" code-switching build-manifest \
         --location "$LOCATION" \
         "${sa_args[@]+"${sa_args[@]}"}"
 }
 
 cmd_code_switching() {
     _cmd_prelude "$@"
-    local cs_pipeline="${CODE_SWITCHING_SRC_DIR}/code_switching_pipeline.py"
-    local cs_qa="${CODE_SWITCHING_SRC_DIR}/code_switching_qa_pipeline.py"
 
     # 1. Chuẩn bị dữ liệu thật (GigaSpeech2-vi scan từ điển + hợp nhất ViMed)
-    py "$cs_pipeline" scan-dictionary --location "$LOCATION"
-    py "$cs_pipeline" merge-datasets --location "$LOCATION"
+    py "$MAIN_PY" code-switching scan-dictionary --location "$LOCATION"
+    py "$MAIN_PY" code-switching merge-datasets --location "$LOCATION"
 
     # 2. Tri thức nền (debate) -- build_debate_seed mặc định theo task code_switching
-    py "${HIEN_TUONG_SRC_DIR}/build_debate_seed.py" --task code_switching --location "$LOCATION"
+    py "$MAIN_PY" debate-seed --task code_switching --location "$LOCATION"
     local rounds="${MAX_ROUNDS:-10}"
     local relay_args=(run --task code_switching --location "$LOCATION" --debate-mode "$DEBATE_MODE"
         --max-rounds "$rounds" --batch-size "${BATCH_SIZE:-24}" --max-workers "${MAX_WORKERS:-8}"
@@ -662,16 +660,16 @@ cmd_code_switching() {
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
     [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
-    py "${HIEN_TUONG_SRC_DIR}/auto_model_relay.py" "${relay_args[@]}"
+    py "$MAIN_PY" relay "${relay_args[@]}"
 
     # 3. Sinh câu hỏi
-    py "$cs_qa" classify-cs --location "$LOCATION"
-    py "$cs_qa" generate-questions --location "$LOCATION"
+    py "$MAIN_PY" code-switching-qa classify-cs --location "$LOCATION"
+    py "$MAIN_PY" code-switching-qa generate-questions --location "$LOCATION"
 
     # 4. Lọc 2 lượt (model mạnh) rồi finalize
     if [[ "${SKIP_FILTER}" == "1" ]]; then
         warn "bỏ qua lọc 2 API code-switching (--skip-filter) -- finalize trực tiếp."
-        py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$CS_MULTIHOP" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
+        py "$MAIN_PY" finalize-qa --pre-final "$CS_MULTIHOP" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
     else
         local gem_filter_args=(--provider gemini --location "$LOCATION" --gemini-model "$GEMINI_MODEL")
         local oai_filter_args=(--provider openai --location "$LOCATION" --openai-model "$OPENAI_MODEL")
@@ -683,9 +681,9 @@ cmd_code_switching() {
         [[ -n "$BATCH_SIZE" ]] && { gem_filter_args+=(--batch-size "$BATCH_SIZE"); oai_filter_args+=(--batch-size "$BATCH_SIZE"); }
         [[ -n "$MAX_WORKERS" ]] && { gem_filter_args+=(--max-workers "$MAX_WORKERS"); oai_filter_args+=(--max-workers "$MAX_WORKERS"); }
         [[ -n "$MAX_RETRIES" ]] && { gem_filter_args+=(--max-retries "$MAX_RETRIES"); oai_filter_args+=(--max-retries "$MAX_RETRIES"); }
-        py "$cs_qa" filter-questions "${gem_filter_args[@]}"
-        py "$cs_qa" filter-questions "${oai_filter_args[@]}"
-        py "${HIEN_TUONG_SRC_DIR}/finalize_qa.py" --pre-final "$CS_OPENAI_KEPT" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
+        py "$MAIN_PY" code-switching-qa filter-questions "${gem_filter_args[@]}"
+        py "$MAIN_PY" code-switching-qa filter-questions "${oai_filter_args[@]}"
+        py "$MAIN_PY" finalize-qa --pre-final "$CS_OPENAI_KEPT" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
     fi
 }
 
@@ -698,7 +696,7 @@ cmd_inspect() {
     if [[ "${EXTRA_ARGS[0]}" == "knowledge-status" && ${#EXTRA_ARGS[@]} -eq 1 ]]; then
         EXTRA_ARGS+=("$KNOWLEDGE_DIR")
     fi
-    py "${TOOLS_DIR}/inspect_qa.py" "${EXTRA_ARGS[@]}"
+    py "$MAIN_PY" inspect-qa "${EXTRA_ARGS[@]}"
 }
 
 # =============================================================================================
@@ -710,17 +708,15 @@ cmd_local_preprocess() {
     # Data root local (<repo>/data hoặc --qa-datasets-dir). Layout khớp các đường dẫn task dùng:
     #   <root>/tu_muon/{tu_muon_tieng_viet_viet_hoa.csv -> _final.csv, asr_samples_with_tu_muon.json}
     #   <root>/tu_lay/{tu_lay_toan_bo_va_van.csv, tu_lay_tieng_viet.csv -> *_final.csv, samples}
-    local base="${QA_DATASETS_DIR}"
-    local pipeline="${HIEN_TUONG_SRC_DIR}/hien_tuong_filter_pipeline.py"
     require_file "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" "release_hf_transcripts_by_dataset.json (corpus có audio)"
 
     case "$TASK" in
         tu-muon)
-            py "$pipeline" filter-csv \
+            py "$MAIN_PY" hien-tuong filter-csv \
                 --src-csv "$TU_MUON_INPUT_DIR/tu_muon_tieng_viet_viet_hoa.csv" --word-col "Từ Tiếng Việt (Việt Hóa)" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --out-csv "$TU_MUON_CSV_PATH"
-            py "$pipeline" build-samples \
+            py "$MAIN_PY" hien-tuong build-samples \
                 --csv "$TU_MUON_CSV_PATH" --word-col "Từ Tiếng Việt (Việt Hóa)" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_muon_xuat_hien \
@@ -728,34 +724,34 @@ cmd_local_preprocess() {
                 --out-json "$TU_MUON_SAMPLES_PATH"
             ;;
         tu-lay)
-            py "$pipeline" filter-csv \
+            py "$MAIN_PY" hien-tuong filter-csv \
                 --src-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van.csv" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --out-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv"
-            py "$pipeline" build-samples \
+            py "$MAIN_PY" hien-tuong build-samples \
                 --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_lay_xuat_hien \
                 --metadata-cols '{"tu": "Từ láy", "phan_loai": "Phân loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
                 --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json"
-            py "$pipeline" split-by-prefix \
+            py "$MAIN_PY" hien-tuong split-by-prefix \
                 --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --column "Phân loại" --prefix "Láy toàn bộ" \
                 --out-csv-matched "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_final.csv" --out-csv-rest "$TU_LAY_INPUT_DIR/tu_lay_van_final.csv" \
                 --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json" --word-col "Từ láy" \
                 --list-key tu_lay_xuat_hien --metadata-word-key tu \
                 --out-samples-matched "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
                 --out-samples-rest "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json"
-            py "$pipeline" filter-csv \
+            py "$MAIN_PY" hien-tuong filter-csv \
                 --src-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet.csv" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --out-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv"
-            py "$pipeline" build-samples \
+            py "$MAIN_PY" hien-tuong build-samples \
                 --csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_lay_xuat_hien \
                 --metadata-cols '{"tu": "Từ láy", "loai_tu_lay": "Loại từ láy", "tu_loai": "Từ loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
                 --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
-            py "$pipeline" dedupe-samples \
+            py "$MAIN_PY" hien-tuong dedupe-samples \
                 --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json" --list-key tu_lay_xuat_hien --word-key tu \
                 --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
                 --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json" \

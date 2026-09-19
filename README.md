@@ -17,6 +17,7 @@ Toàn bộ pipeline Benchmark QA trước đây nằm trong
 ├── requirements.txt
 ├── noteboooks/                        # notebook khám phá (BỊ GITIGNORE, không push)
 └── src/
+    ├── main.py                        # <-- entrypoint PYTHON duy nhất cho benchmark_qa
     ├── test_set/
     │   ├── datasets_qa/               # xây benchmark QA
     │   │   ├── translate_datasets/    # translate_dataset.py, hf_pr_push.py, generate_report.py
@@ -42,6 +43,36 @@ Toàn bộ pipeline Benchmark QA trước đây nằm trong
 ## 2. Benchmark QA — chạy bằng bash
 
 ### 2.1 Cấu hình (đọc từ `.env`, KHÔNG truyền token qua cờ)
+
+**Entrypoint Python duy nhất**: mọi script benchmark_qa được gọi qua `src/main.py`
+(`python src/main.py <subcommand> [args...]`), KHÔNG còn `if __name__ == "__main__"` trong từng
+file. `benchmark_qa.sh` chỉ là lớp orchestration gọi dispatcher này.
+
+| Subcommand | Script |
+|---|---|
+| `clotho-aqa` | `sound/clotho_aqa_pipeline.py` |
+| `sound-merge` | `sound/sound_dataset_merge.py` |
+| `apply-kg` | `.../apply_knowledge_graph.py` |
+| `relay` | `.../auto_model_relay.py` |
+| `debate-seed` | `.../build_debate_seed.py` |
+| `filter-qa` | `.../filter_qa_pipeline.py` |
+| `finalize-qa` | `.../finalize_qa.py` |
+| `han-viet` | `.../han_viet/han_viet_pipeline.py` |
+| `han-viet-seed` | `.../han_viet/han_viet_seed_csv.py` |
+| `hien-tuong` | `.../hien_tuong_filter_pipeline.py` |
+| `phuong-ngu` | `.../phuong_ngu/phuong_ngu_pipeline.py` |
+| `tu-lay` | `.../tu_lay/tu_lay_pipeline.py` |
+| `tu-muon` | `.../tu_muon/tu_muon_pipeline.py` |
+| `code-switching` | `.../code_switching/code_switching_pipeline.py` |
+| `code-switching-qa` | `.../code_switching/code_switching_qa_pipeline.py` |
+| `inspect-qa` | `tools/inspect_qa.py` |
+| `fetch-datasets` | `tools/fetch_datasets.py` |
+| `hf-pr-push` | `translate_datasets/hf_pr_push.py` |
+| `translate-dataset` | `translate_datasets/translate_dataset.py` |
+
+Ví dụ: `python src/main.py han-viet classify-levels --input ... --output ...`,
+`python src/main.py relay run --task code_switching --debate-mode api`,
+`python src/main.py filter-qa filter-qa --task tu_lay --provider gemini ...`.
 
 `run/benchmark_qa.sh` tự source theo thứ tự: `.env` ở gốc repo → `run/.env` (file sau ghi đè).
 Copy mẫu rồi điền:

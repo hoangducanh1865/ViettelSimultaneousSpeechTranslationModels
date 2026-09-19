@@ -552,7 +552,3 @@ def main(argv: Optional[list[str]] = None) -> None:
     elif args.command == "build-cloze-samples":
         corpus, all_samples = load_corpus_and_samples(args.vlsp_glob, Path(args.ledger) if args.ledger else None, Path(args.full_transcripts_json) if args.full_transcripts_json else None)
         build_cloze_samples(Path(args.csv), args.word_col, args.base_word_col, all_samples, corpus, args.list_key, Path(args.out_json))
-
-
-if __name__ == "__main__":
-    main()

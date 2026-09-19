@@ -460,7 +460,3 @@ def main(argv: Optional[list[str]] = None) -> None:
         vimed_normal = Path(args.vimed_normal) if args.vimed_normal else cs_dir / "vimed_css_test.jsonl"
         output = Path(args.output) if args.output else cs_dir / "code_switching_qa.jsonl"
         merge_datasets(giga_scanned, vimed_hard, vimed_normal, output)
-
-
-if __name__ == "__main__":
-    main()

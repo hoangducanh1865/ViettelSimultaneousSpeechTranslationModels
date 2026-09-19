@@ -315,7 +315,3 @@ def main(argv: Optional[list[str]] = None) -> None:
             system_prompt=system_prompt, context_fields=context_fields,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
-
-
-if __name__ == "__main__":
-    main()

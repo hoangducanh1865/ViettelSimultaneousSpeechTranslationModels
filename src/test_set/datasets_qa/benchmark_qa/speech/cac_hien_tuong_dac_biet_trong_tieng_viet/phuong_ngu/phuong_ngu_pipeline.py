@@ -353,7 +353,3 @@ def main(argv: Optional[list[str]] = None) -> None:
             client, model, region_records, Path(args.output), knowledge_graph=knowledge_graph,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
-
-
-if __name__ == "__main__":
-    main()

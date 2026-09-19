@@ -677,7 +677,3 @@ def main(argv: Optional[list[str]] = None) -> None:
             provider_call, records, kept_output, rules_output,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
         )
-
-
-if __name__ == "__main__":
-    main()

@@ -276,7 +276,3 @@ def main(argv: Optional[list[str]] = None) -> None:
     else:
         print(f"Đã lưu {args.out_json} ({len(seed['candidate_words'])} candidate word, "
               f"{len(seed['unmatched_transcript_sample'])} transcript chưa khớp mẫu).")
-
-
-if __name__ == "__main__":
-    main()

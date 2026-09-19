@@ -575,7 +575,3 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     elif args.command == "fill-fields":
         fill_fields(Path(args.multihop), Path(args.original))
-
-
-if __name__ == "__main__":
-    main()

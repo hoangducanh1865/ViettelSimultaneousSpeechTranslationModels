@@ -59,7 +59,3 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--out-csv", required=True)
     args = parser.parse_args(argv)
     build_seed_csv(Path(args.input), Path(args.out_csv))
-
-
-if __name__ == "__main__":
-    main()

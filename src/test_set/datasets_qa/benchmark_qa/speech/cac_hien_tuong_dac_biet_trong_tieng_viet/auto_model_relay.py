@@ -1026,7 +1026,3 @@ def main(argv: Optional[list[str]] = None) -> None:
             for t in state.turns:
                 print(f"  round {t.round_index} turn {t.turn_index} [{t.model}] vote={t.consensus_vote} "
                       f"parsed={'ok' if t.parsed_knowledge else 'lỗi'}")
-
-
-if __name__ == "__main__":
-    main()
