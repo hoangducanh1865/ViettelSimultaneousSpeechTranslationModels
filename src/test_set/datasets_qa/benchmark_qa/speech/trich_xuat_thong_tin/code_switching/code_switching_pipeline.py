@@ -14,8 +14,8 @@ trong 1 corpus tiếng Việt khác (GigaSpeech2-vi), vì MMSU không cung cấp
                          cột khi tải), giữ lại CHỈ sample thuộc subset Code-switching, ghi audio
                          .wav + manifest JSONL (question/choices/answer gốc tiếng Anh).
   2. build-vi-input -- (nhánh GigaSpeech2-vi) join 1 file transcript thô (audio_filepath nội bộ,
-                         KHÔNG tải được) với release_hf_transcripts_by_dataset.json (CÓ audio
-                         thật) theo transcript khớp NGUYÊN VĂN, để có (transcript, audio thật)
+                         KHÔNG tải được) với speech_sources.jsonl (CÓ audio
+                         thật, path chuẩn hoá) theo transcript khớp NGUYÊN VĂN, để có (transcript, audio thật)
                          làm input cho bước sau.
   3. extract-terms   -- (nhánh GigaSpeech2-vi) Gemini phát hiện (các) từ/cụm code-switching THẬT
                          trong mỗi transcript (verify lại NGUYÊN VĂN xuất hiện trong câu để chống
@@ -27,7 +27,7 @@ Usage:
 
     python code_switching_pipeline.py build-vi-input \\
         --transcripts /path/to/giga_speech_test.jsonl \\
-        --release-hf-json /path/to/release_hf_transcripts_by_dataset.json \\
+        --release-hf-json /path/to/speech_sources.jsonl \\
         --output /path/to/code_switching_vi_input.jsonl
 
     python code_switching_pipeline.py extract-terms \\
@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "cac_hien_tuong_dac_biet_trong_tieng_viet"))
 
 import env_paths  # noqa: E402
+import usage_tracker  # noqa: E402
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client  # noqa: E402
 
 TASK_NAME = "code_switch_question_answering"
@@ -151,16 +152,29 @@ def build_vi_input(
     dataset_name: str = "gigaspeech2_vi",
 ) -> None:
     """Join 1 file transcript thô (audio_filepath trỏ vào server nội bộ, KHÔNG tải được -- ví dụ
-    export từ /raid/... của máy huấn luyện ASR) với release_hf_transcripts_by_dataset.json (CÓ
-    audio thật, tải được) theo transcript khớp NGUYÊN VĂN (chuẩn hoá khoảng trắng/hoa-thường) --
+    export từ /raid/... của máy huấn luyện ASR) với corpus `speech_sources.jsonl` (audio path đã
+    chuẩn hoá, tải được) theo transcript khớp NGUYÊN VĂN (chuẩn hoá khoảng trắng/hoa-thường) --
     lấy audio path THẬT thay cho audio_filepath cũ."""
     with open(transcripts_path, encoding="utf-8") as f:
         raw = [json.loads(line) for line in f if line.strip()]
-    with open(release_hf_path, encoding="utf-8") as f:
-        release = json.load(f)
 
-    pool = release.get(dataset_name, [])
-    by_text = {" ".join(it["transcript"].lower().split()): it["audio"] for it in pool}
+    by_text: dict[str, str] = {}
+    if release_hf_path.suffix == ".jsonl":
+        with open(release_hf_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                it = json.loads(line)
+                text = it.get("text") or it.get("transcript")
+                audio = it.get("file_name") or it.get("audio")
+                if text and audio:
+                    by_text.setdefault(" ".join(text.lower().split()), audio)
+    else:
+        with open(release_hf_path, encoding="utf-8") as f:
+            release = json.load(f)
+        pool = release.get(dataset_name, []) if isinstance(release, dict) else release
+        by_text = {" ".join(it["transcript"].lower().split()): it["audio"] for it in pool}
 
     matched = []
     for i, r in enumerate(raw):
@@ -216,12 +230,14 @@ _TERM_TYPES = {"person_name", "brand_org_name", "place_name", "technical_term", 
 def _extract_terms_batch(client, model, batch, max_retries):
     from google.genai import types
 
+    usage_tracker.set_context(task=TASK_NAME, stage="extract-terms")
     payload = [{"id": r["id"], "transcript": r["transcript"]} for r in batch]
     by_id = {r["id"]: r for r in batch}
     ids_sent = set(by_id)
     last_error = None
     for attempt in range(max_retries):
         try:
+            start = time.perf_counter()
             response = client.models.generate_content(
                 model=model,
                 contents=json.dumps(payload, ensure_ascii=False),
@@ -229,6 +245,8 @@ def _extract_terms_batch(client, model, batch, max_retries):
                     system_instruction=CS_EXTRACT_SYSTEM_PROMPT, temperature=0.0, max_output_tokens=4096,
                 ),
             )
+            inp, out = usage_tracker.extract_usage(response)
+            usage_tracker.record("gemini", model, inp, out, elapsed_sec=time.perf_counter() - start)
             raw = (response.text or "").strip()
             raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
             results = json.loads(raw)
@@ -404,7 +422,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2 = sub.add_parser("build-vi-input", help="Join transcript thô (GigaSpeech2-vi) với audio thật.")
     env_paths.add_location_arg(p2)
     p2.add_argument("--transcripts", default=None, help="Mặc định: {code_switching_dir}/giga_speech_test.jsonl.")
-    p2.add_argument("--release-hf-json", required=True)
+    p2.add_argument("--release-hf-json", required=True, help="speech_sources.jsonl (corpus, audio path chuẩn hoá).")
     p2.add_argument("--dataset-name", default="gigaspeech2_vi")
     p2.add_argument("--output", default=None, help="Mặc định: {code_switching_dir}/code_switching_vi_input.jsonl.")
 

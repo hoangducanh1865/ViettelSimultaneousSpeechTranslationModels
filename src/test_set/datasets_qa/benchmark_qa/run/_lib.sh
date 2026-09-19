@@ -44,6 +44,10 @@ _load_env_file "${_RUN_DIR}/.env"
 : "${DEBATE_MODE:=api}"                 # api (2 API tự debate) hoặc manual (copy-paste) -- 2 chế độ chạy Y HỆT các bước sau
 : "${RERUN_MODE:=fresh}"                # fresh (chạy mới, ghi đè) hoặc failed (chỉ chạy lại sample lỗi)
 : "${DRY_RUN:=0}"
+# Ngưỡng an toàn chi phí: chặn tổng số câu hỏi sinh ra mỗi lượt generate-questions (mặc định 5000).
+: "${MAX_QUESTIONS:=5000}"
+# Chặn số candidate_units/candidate_words đưa vào debate (rỗng = không chặn).
+: "${MAX_UNITS:=}"
 # Model + base_url ĐỊNH NGHĨA TRONG CODE (auto_model_relay.DEFAULT_*), KHÔNG đặt default ở đây.
 # Chỉ truyền xuống pipeline khi user override qua flag (rỗng = để code tự chọn model theo vai).
 GEMINI_MODEL="${GEMINI_MODEL:-}"
@@ -91,8 +95,9 @@ resolve_paths() {
     : "${HF_SOUND_REPO:=anhnbd2005/Vietnamese-Audio-QA}"
 
     BENCHMARK_QA_SPEECH_DIR="${QA_DATASETS_DIR}/benchmark_qa/speech/cac_hien_tuong_dac_biet_trong_tieng_viet"
-    : "${FULL_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/full_transcripts.json}"
-    : "${RELEASE_HF_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/release_hf_transcripts_by_dataset.json}"
+    # Corpus DUY NHẤT: speech_sources.jsonl (đầy đủ nhất, audio path đã chuẩn hoá).
+    : "${FULL_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/speech_sources.jsonl}"
+    : "${RELEASE_HF_TRANSCRIPTS_JSON_PATH:=${QA_DATASETS_DIR}/benchmark_qa/speech/speech_sources.jsonl}"
 
     # --- Code-switching + knowledge dir dùng CÙNG layout tương đối cho cả drive lẫn local ---
     : "${CODE_SWITCHING_DIR:=${QA_DATASETS_DIR}/benchmark_qa/speech/trich_xuat_thong_tin/code_switching}"
@@ -138,16 +143,19 @@ resolve_paths() {
     PHUONG_NGU_QA_OUTPUT="${PHUONG_NGU_OUT_DIR}/phuong_ngu_region_qa.jsonl"
     PHUONG_NGU_FINAL_QA="${PHUONG_NGU_OUT_DIR}/phuong_ngu_region_qa_final.jsonl"
 
-    TU_MUON_INPUT_DIR="${QA_DATASETS_DIR}/tu_muon"
+    # Input sống CÙNG task dir với output (data/.../cac_hien_tuong_dac_biet_trong_tieng_viet/<task>),
+    # KHÔNG còn ở <root>/tu_muon, <root>/tu_lay.
+    TU_MUON_FINAL_DIR="${BENCHMARK_QA_SPEECH_DIR}/tu_muon"
+    TU_MUON_INPUT_DIR="${TU_MUON_FINAL_DIR}"
     TU_MUON_SAMPLES_PATH="${TU_MUON_INPUT_DIR}/asr_samples_with_tu_muon.json"
     TU_MUON_CSV_PATH="${TU_MUON_INPUT_DIR}/tu_muon_tieng_viet_viet_hoa_final.csv"
-    TU_MUON_FINAL_DIR="${BENCHMARK_QA_SPEECH_DIR}/tu_muon"
     TU_MUON_DIFFICULTY_OUTPUT="${TU_MUON_FINAL_DIR}/tu_muon_difficulty_levels.jsonl"
     TU_MUON_MULTIHOP_OUTPUT="${TU_MUON_FINAL_DIR}/tu_muon_multihop_qa.jsonl"
     TU_MUON_FINAL_QA="${TU_MUON_FINAL_DIR}/tu_muon_multihop_qa_final.jsonl"
 
-    TU_LAY_INPUT_DIR="${QA_DATASETS_DIR}/tu_lay"
     TU_LAY_FINAL_DIR="${BENCHMARK_QA_SPEECH_DIR}/tu_lay"
+    TU_LAY_INPUT_DIR="${TU_LAY_FINAL_DIR}"
+    TU_LAY_CSV_PATH="${TU_LAY_INPUT_DIR}/tu_lay.csv"
 
     # --- Code-switching: output của 2 lượt lọc (filter-questions) + file final ---
     CS_CLASSIFIED="${CODE_SWITCHING_DIR}/code_switching_classified.jsonl"
@@ -165,7 +173,6 @@ ensure_output_dirs() {
         "${KNOWLEDGE_DIR}" "${BENCHMARK_QA_SPEECH_DIR}" \
         "${HAN_VIET_OUT_DIR}" "${PHUONG_NGU_OUT_DIR}" \
         "${TU_MUON_FINAL_DIR}" "${TU_LAY_FINAL_DIR}" \
-        "${TU_MUON_INPUT_DIR}" "${TU_LAY_INPUT_DIR}" \
         "${CODE_SWITCHING_DIR}" "${LOG_DIR}" \
         "${CLOTHO_AQA_DIR}" "${SOUND_OUT_DIR}" "${VIETNAMESE_SPEECH_QA_LOCAL_DIR}"
 }

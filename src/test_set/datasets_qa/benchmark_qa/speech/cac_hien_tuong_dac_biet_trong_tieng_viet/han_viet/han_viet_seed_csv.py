@@ -6,7 +6,7 @@ already tied to a "Sino-Vietnamese Lexical Semantics" subset published on HF. Th
 Hán Việt a starting-point CSV (word + meaning, deduped) so it can go through the SAME
 filter-csv -> build-samples -> word-coverage-report -> manual_model_relay.py flow every other
 task already uses -- the 3-model debate then reviews/corrects this seed AND actively proposes
-brand-new Hán Việt words found via web-research + a full_transcripts.json corpus scan (Hán Việt
+brand-new Hán Việt words found via web-research + a speech_sources.jsonl corpus scan (Hán Việt
 is an open lexical class, so this bootstrap is a starting point, not a ceiling).
 
 Usage:

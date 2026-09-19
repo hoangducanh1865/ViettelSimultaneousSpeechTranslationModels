@@ -11,11 +11,8 @@ Two transcript sources, combinable (UNION, not either/or):
   - vlsp/*.json + asr_source_ledger.json: LOCAL ONLY (stuff/ is gitignored, never pushed to
     GitHub) -- Colab has no access to them. Run --vlsp-glob/--ledger here, then upload the
     resulting --out-csv/--out-json files to Google Drive for Colab to consume.
-  - full_transcripts.json (--full-transcripts-json): a Drive-resident copy of
-    stuff/benchmark_qa/release_hf_transcripts_by_dataset.json (20 dataset, ~35k transcript,
-    broader dataset coverage than vlsp+ledger's ~12 dataset) -- because this file lives on
-    Drive, not in gitignored stuff/, every subcommand below can now ALSO run directly on Colab
-    when only --full-transcripts-json is given (no local-only step required).
+  - speech_sources.jsonl (--full-transcripts-json): corpus DUY NHẤT, đầy đủ nhất, audio path đã
+    chuẩn hoá (file_name/text/dataset/...). Mọi subcommand dưới đây chạy trực tiếp với file này.
 
 6 subcommands:
   1. filter-csv            -- keep only candidate-CSV rows whose word/phrase appears (word-
@@ -159,16 +156,35 @@ def _load_samples_from_ledger(path: Path) -> list[dict]:
 
 
 def _load_samples_from_full_transcripts(path: Path) -> list[dict]:
-    """full_transcripts.json chấp nhận CẢ 2 dạng:
-      (a) list phẳng [{"dataset": str, "transcript": str, ...}, ...] -- dạng THẬT của file này
-          trên Drive/local hiện tại (94k+ entry, "dataset" là field trong từng object).
-      (b) dict {dataset_name: [{"audio": str, "transcript": str}, ...]} -- dạng
-          release_hf_transcripts_by_dataset.json gốc, giữ tương thích ngược nếu ai đó dùng bản
-          đó thay vì bản list phẳng."""
+    """Nguồn corpus chính: `speech_sources.jsonl` (mỗi dòng có file_name/text/dataset...). Vẫn
+    chấp nhận JSON cũ để tương thích ngược:
+      (a) `.jsonl` -- mỗi dòng {"file_name": audio, "text": transcript, "dataset": ...}.
+      (b) list phẳng [{"dataset": str, "transcript": str}, ...] (full_transcripts.json cũ).
+      (c) dict {dataset: [{"audio": str, "transcript": str}, ...]} (release_hf cũ)."""
+    samples: list[dict] = []
+    if path.suffix == ".jsonl":
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                item = json.loads(line)
+                text = item.get("text") or item.get("transcript")
+                if not text:
+                    continue
+                audio = item.get("file_name") or item.get("audio") or item.get("audio_filepath")
+                dataset = item.get("dataset") or "unknown"
+                # path có "data/<dataset>/..." để _dataset_from_audio_filepath suy đúng dataset.
+                audio_filepath = f"data/{dataset}/{audio}" if audio else None
+                samples.append({
+                    "transcript": text, "audio_filepath": audio_filepath, "dataset": dataset,
+                    "source_file": item.get("source_file", path.name),
+                })
+        return samples
+
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
-    samples = []
     if isinstance(data, list):
         for item in data:
             if item.get("transcript"):
@@ -195,7 +211,7 @@ def load_corpus_and_samples(
     """Trả về (corpus_normalized, all_samples) -- dùng chung cho filter-csv/build-samples/
     word-coverage-report/build-cloze-samples để đảm bảo mọi bước luôn thấy CÙNG 1 nguồn
     transcript. Cần ít nhất 1 trong 2 nguồn: (vlsp_glob + ledger_path) và/hoặc
-    full_transcripts_json -- gọi CẢ HAI để quét UNION của 2 phạm vi (mở rộng, không thay thế
+    speech_sources.jsonl (--full-transcripts-json) -- gọi CẢ HAI để quét UNION của 2 phạm vi (mở rộng, không thay thế
     phạm vi vlsp+ledger cũ)."""
     if not (vlsp_glob and ledger_path) and not full_transcripts_json:
         raise ValueError("Cần ít nhất 1 nguồn: (--vlsp-glob + --ledger) và/hoặc --full-transcripts-json.")
@@ -385,8 +401,8 @@ def word_coverage_report(
 ) -> dict[str, dict]:
     """Với mỗi từ candidate, đếm số lần xuất hiện + phân bố theo dataset + vài transcript ví dụ.
     Dùng để (a) cấp bằng chứng THẬT cho build_debate_seed.py (không bịa), (b) lộ ra ngay từ nào
-    0 hit trong TOÀN BỘ corpus đã quét (kể cả sau khi mở rộng full_transcripts.json) -- những từ
-    này không đáng đưa vào 1 vòng debate, và (c) định lượng full_transcripts.json thực sự tăng
+    0 hit trong TOÀN BỘ corpus đã quét (kể cả sau khi mở rộng speech_sources.jsonl) -- những từ
+    này không đáng đưa vào 1 vòng debate, và (c) định lượng speech_sources.jsonl thực sự tăng
     thêm bao nhiêu sample dùng được cho mỗi từ (kiểm tra sizing benchmark)."""
     report: dict[str, dict] = {}
     for w in words:
@@ -475,7 +491,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--word-col", required=True)
     p1.add_argument("--vlsp-glob", default=None)
     p1.add_argument("--ledger", default=None)
-    p1.add_argument("--full-transcripts-json", default=None, help="Bản Drive của release_hf_transcripts_by_dataset.json -- quét THÊM (không thay) vlsp+ledger.")
+    p1.add_argument("--full-transcripts-json", default=None, help="speech_sources.jsonl (corpus đầy đủ, audio path chuẩn hoá) -- quét THÊM (không thay) vlsp+ledger.")
     p1.add_argument("--out-csv", required=True)
 
     p2 = sub.add_parser("build-samples")

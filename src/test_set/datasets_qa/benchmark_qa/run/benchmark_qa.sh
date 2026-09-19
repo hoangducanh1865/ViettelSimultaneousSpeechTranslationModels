@@ -69,7 +69,7 @@ SUBCOMMAND:
     code-switching        Trích xuất thông tin: scan-dictionary -> merge -> debate -> classify -> generate -> LỌC 2 API -> finalize
     code-switching-mmsu   Nhánh MMSU: build-manifest subset Code-switching (111 sample)
     inspect               Thống kê/in manifest: <tree|stats|sample|head|knowledge-status>
-    local-preprocess      Tiền xử lý local-only (--task tu-muon|tu-lay), cần stuff/benchmark_qa/
+    local-preprocess      Tiền xử lý local-only (--task tu-muon|tu-lay) từ input trong task dir
     all                   Chạy toàn bộ (sound + 4 task + code-switching), có thể skip từng phần
 
 FLAG DÙNG CHUNG:
@@ -78,8 +78,8 @@ FLAG DÙNG CHUNG:
     --qa-datasets-dir DIR             Gốc dữ liệu QA trên Drive
     --service-account-json FILE       Service account Gemini (mặc định: Drive)
     --knowledge-dir DIR               Thư mục knowledge_<task>.json
-    --full-transcripts-json FILE      Corpus text rộng (full_transcripts.json)
-    --release-hf-transcripts-json F   Corpus CÓ audio (release_hf_transcripts_by_dataset.json)
+    --full-transcripts-json FILE      Corpus (speech_sources.jsonl, audio path đã chuẩn hoá)
+    --release-hf-transcripts-json F   Corpus (speech_sources.jsonl) -- nay cùng 1 file với trên
     --speech-local-dir DIR            local_dir của Vietnamese-Speech-QA
     --python BIN                      (mặc định: python3)
     --task NAME                       (debate / local-preprocess)
@@ -94,6 +94,8 @@ FLAG DÙNG CHUNG:
     --openai-api-key-file FILE        Key OpenAI-compatible khi không dùng .env
     --env-file FILE                   File .env local (KEY="value" # base_url # model)
     --model --batch-size --max-workers --max-retries --max-rounds --seed
+    --max-questions N                 (mặc định 5000: chặn tổng số câu hỏi sinh ra mỗi lượt generate)
+    --max-units N                     (chặn số candidate đưa vào debate; mặc định không chặn)
     --skip-filter                     Bỏ bước lọc 2 API (chỉ finalize trực tiếp)
     --push                            sound: zip + tạo PR lên HF
     --with-debate                     all: tương đương --debate cho mọi task
@@ -148,6 +150,8 @@ parse_common() {
             --seed)                        SEED="$2"; shift 2 ;;
             --on-missing)                  ON_MISSING="$2"; shift 2 ;;
             --rerun-mode)                  RERUN_MODE="$2"; shift 2 ;;
+            --max-questions)               MAX_QUESTIONS="$2"; shift 2 ;;
+            --max-units)                   MAX_UNITS="$2"; shift 2 ;;
             --debate)                      DEBATE=1; shift ;;
             --skip-filter)                 SKIP_FILTER=1; shift ;;
             --push)                        PUSH=1; shift ;;
@@ -289,7 +293,7 @@ run_filter_2api() {
     py "$MAIN_PY" finalize-qa --pre-final "$FILTER_OAI_JSONL" --final "$final" --on-missing "$ON_MISSING"
     # Bản mở rộng: final + field debug (transcript/question_type/difficulty/level/target words...).
     extend_final "$task" "$final" \
-        --join "${pre}::id::transcript,question_type,difficulty,level,max_level,target_word,target_terms,historical_fact,cultural_fact,base_word,region_or_ethnic_group,tone_register"
+        --join "${pre}::id::transcript,question_type,question_aspect,difficulty,level,max_level,target_word,target_terms,historical_fact,cultural_fact,base_word,region_or_ethnic_group,tone_register,loai_lay"
 }
 
 # =============================================================================================
@@ -402,6 +406,7 @@ cmd_debate() {
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
     [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
+    [[ -n "$MAX_UNITS" ]] && relay_args+=(--max-units "$MAX_UNITS")
     [[ ${#ONLY_IDS_ARGS[@]} -gt 0 ]] && relay_args+=("${ONLY_IDS_ARGS[@]}")
 
     py "$MAIN_PY" relay "${relay_args[@]}"
@@ -564,6 +569,7 @@ cmd_tu_lay_variant() {
         --input "$TU_LAY_VARIANT_DIFFICULTY" \
         --csv "$TU_LAY_VARIANT_CSV" \
         --output "$TU_LAY_VARIANT_MULTIHOP" \
+        --max-questions "$MAX_QUESTIONS" \
         "${knowledge_args[@]+"${knowledge_args[@]}"}"
 
     run_filter_2api tu_lay "$TU_LAY_VARIANT_MULTIHOP" "$TU_LAY_VARIANT_FINAL_QA"
@@ -578,13 +584,29 @@ cmd_tu_lay_cloze() {
         run rm -f "$cloze_output" "$(extended_final_path "${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa_final.jsonl")"
     fi
 
+    # apply-kg ghi cột "Từ gốc (cơ sở)" (field base_word của knowledge graph) vào CSV cloze --
+    # KHÔNG ghi đè CSV gốc (để local-preprocess có thể tái tạo).
+    local kg_toan_bo="${KNOWLEDGE_DIR}/knowledge_tu_lay_toan_bo.json"
+    local cloze_csv="${TU_LAY_VARIANT_CSV%.csv}_cloze.csv"
+    if [[ -f "$kg_toan_bo" ]]; then
+        py "$MAIN_PY" apply-kg \
+            --knowledge-json "$kg_toan_bo" \
+            --base-csv "$TU_LAY_VARIANT_CSV" --word-col "Từ láy" \
+            --field-map '{"base_word": "Từ gốc (cơ sở)"}' \
+            --out-csv "$cloze_csv"
+    else
+        warn "chưa có $kg_toan_bo -- cloze sẽ rỗng do thiếu cột 'Từ gốc (cơ sở)' (chạy --debate để sinh KG)."
+        cloze_csv="$TU_LAY_VARIANT_CSV"
+    fi
+
     py "$MAIN_PY" hien-tuong build-cloze-samples \
-        --csv "$TU_LAY_VARIANT_CSV" --word-col "Từ láy" --base-word-col "Từ gốc (cơ sở)" \
+        --csv "$cloze_csv" --word-col "Từ láy" --base-word-col "Từ gốc (cơ sở)" \
         --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
         --list-key tu_lay_cloze_candidate --out-json "$TU_LAY_CLOZE_SAMPLES"
     py "$MAIN_PY" tu-lay generate-cloze-questions \
         --samples "$TU_LAY_CLOZE_SAMPLES" \
-        --csv "$TU_LAY_VARIANT_CSV" \
+        --csv "$cloze_csv" \
+        --max-questions "$MAX_QUESTIONS" \
         --output "$cloze_output"
 
     run_filter_2api tu_lay "$cloze_output" "${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa_final.jsonl"
@@ -699,7 +721,7 @@ cmd_code_switching() {
 
     # 3. Sinh câu hỏi (resumable: tự bỏ qua câu đã có -> rerun chỉ sinh phần thiếu)
     py "$MAIN_PY" code-switching-qa classify-cs --location "$LOCATION"
-    py "$MAIN_PY" code-switching-qa generate-questions --location "$LOCATION"
+    py "$MAIN_PY" code-switching-qa generate-questions --location "$LOCATION" --max-questions "$MAX_QUESTIONS"
 
     # 4. Lọc 2 lượt (model mạnh) rồi finalize
     if [[ "${SKIP_FILTER}" == "1" ]]; then
@@ -747,10 +769,10 @@ cmd_inspect() {
 cmd_local_preprocess() {
     _cmd_prelude "$@"
     require_var "TASK" "$TASK"
-    # Data root local (<repo>/data hoặc --qa-datasets-dir). Layout khớp các đường dẫn task dùng:
-    #   <root>/tu_muon/{tu_muon_tieng_viet_viet_hoa.csv -> _final.csv, asr_samples_with_tu_muon.json}
-    #   <root>/tu_lay/{tu_lay_toan_bo_va_van.csv, tu_lay_tieng_viet.csv -> *_final.csv, samples}
-    require_file "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" "release_hf_transcripts_by_dataset.json (corpus có audio)"
+    # Data root local (<repo>/data hoặc --qa-datasets-dir). Input sống CÙNG task dir với output:
+    #   .../cac_hien_tuong_dac_biet_trong_tieng_viet/tu_muon/{tu_muon_tieng_viet_viet_hoa.csv -> _final.csv, asr_samples_with_tu_muon.json}
+    #   .../cac_hien_tuong_dac_biet_trong_tieng_viet/tu_lay/{tu_lay.csv -> tu_lay_{toan_bo,van,tieng_viet}_final.csv, samples}
+    require_file "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" "speech_sources.jsonl (corpus, audio path chuẩn hoá)"
 
     case "$TASK" in
         tu-muon)
@@ -766,38 +788,41 @@ cmd_local_preprocess() {
                 --out-json "$TU_MUON_SAMPLES_PATH"
             ;;
         tu-lay)
+            # 1 file gộp duy nhất: <task>/tu_lay.csv, cột "Loại láy" chú thích loại (Láy toàn bộ /
+            # Láy vần (...) / Láy âm đầu / Láy ba tiếng...). Lọc corpus 1 lần rồi tách 3 variant:
+            #   toan_bo <- "Láy toàn bộ*", van <- "Láy vần*", chung <- phần còn lại.
+            require_file "$TU_LAY_CSV_PATH" "tu_lay.csv (input gộp từ láy)"
+            local tu_lay_filtered="${TU_LAY_INPUT_DIR}/tu_lay_filtered.csv"
+            local tu_lay_samples_all="${TU_LAY_INPUT_DIR}/asr_samples_with_tu_lay_all.json"
+            local tu_lay_rest_csv="${TU_LAY_INPUT_DIR}/.tu_lay_rest.csv"
+            local tu_lay_rest_samples="${TU_LAY_INPUT_DIR}/.asr_samples_with_tu_lay_rest.json"
+            local tu_lay_meta='{"tu": "Từ láy", "loai_lay": "Loại láy", "phan_loai": "Loại láy", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt", "loai_tu_lay": "Loại từ láy", "tu_loai": "Từ loại"}'
+
             py "$MAIN_PY" hien-tuong filter-csv \
-                --src-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van.csv" --word-col "Từ láy" \
+                --src-csv "$TU_LAY_CSV_PATH" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
-                --out-csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv"
+                --out-csv "$tu_lay_filtered"
             py "$MAIN_PY" hien-tuong build-samples \
-                --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --word-col "Từ láy" \
+                --csv "$tu_lay_filtered" --word-col "Từ láy" \
                 --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
                 --list-key tu_lay_xuat_hien \
-                --metadata-cols '{"tu": "Từ láy", "phan_loai": "Phân loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
-                --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json"
+                --metadata-cols "$tu_lay_meta" \
+                --out-json "$tu_lay_samples_all"
             py "$MAIN_PY" hien-tuong split-by-prefix \
-                --csv "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_va_van_final.csv" --column "Phân loại" --prefix "Láy toàn bộ" \
-                --out-csv-matched "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_final.csv" --out-csv-rest "$TU_LAY_INPUT_DIR/tu_lay_van_final.csv" \
-                --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo_va_van.json" --word-col "Từ láy" \
+                --csv "$tu_lay_filtered" --column "Loại láy" --prefix "Láy toàn bộ" \
+                --out-csv-matched "$TU_LAY_INPUT_DIR/tu_lay_toan_bo_final.csv" --out-csv-rest "$tu_lay_rest_csv" \
+                --samples "$tu_lay_samples_all" --word-col "Từ láy" \
                 --list-key tu_lay_xuat_hien --metadata-word-key tu \
                 --out-samples-matched "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
-                --out-samples-rest "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json"
-            py "$MAIN_PY" hien-tuong filter-csv \
-                --src-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet.csv" --word-col "Từ láy" \
-                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
-                --out-csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv"
-            py "$MAIN_PY" hien-tuong build-samples \
-                --csv "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv" --word-col "Từ láy" \
-                --full-transcripts-json "$RELEASE_HF_TRANSCRIPTS_JSON_PATH" \
-                --list-key tu_lay_xuat_hien \
-                --metadata-cols '{"tu": "Từ láy", "loai_tu_lay": "Loại từ láy", "tu_loai": "Từ loại", "y_nghia": "Ý nghĩa", "sac_thai_bieu_dat": "Sắc thái biểu đạt"}' \
-                --out-json "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
-            py "$MAIN_PY" hien-tuong dedupe-samples \
-                --samples "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json" --list-key tu_lay_xuat_hien --word-key tu \
-                --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_toan_bo.json" \
-                --against "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json" \
-                --output "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
+                --out-samples-rest "$tu_lay_rest_samples"
+            py "$MAIN_PY" hien-tuong split-by-prefix \
+                --csv "$tu_lay_rest_csv" --column "Loại láy" --prefix "Láy vần" \
+                --out-csv-matched "$TU_LAY_INPUT_DIR/tu_lay_van_final.csv" --out-csv-rest "$TU_LAY_INPUT_DIR/tu_lay_tieng_viet_final.csv" \
+                --samples "$tu_lay_rest_samples" --word-col "Từ láy" \
+                --list-key tu_lay_xuat_hien --metadata-word-key tu \
+                --out-samples-matched "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay_van.json" \
+                --out-samples-rest "$TU_LAY_INPUT_DIR/asr_samples_with_tu_lay.json"
+            run rm -f "$tu_lay_rest_csv" "$tu_lay_rest_samples"
             ;;
         *) die "--task phải là tu-muon hoặc tu-lay (nhận: $TASK)." ;;
     esac

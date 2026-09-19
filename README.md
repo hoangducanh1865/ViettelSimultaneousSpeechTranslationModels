@@ -93,8 +93,8 @@ cp src/test_set/datasets_qa/benchmark_qa/run/config.env.example \
 | `ENV_FILE` | không | File credential: `<drive>/voice_agent_for_edge_device/.env` (drive) / `<repo>/.env` (local) |
 | `SERVICE_ACCOUNT_JSON` | không | Service account Gemini (Vertex AI); bỏ trống thì dùng `ENV_FILE` proxy |
 | `KNOWLEDGE_DIR` | không | Nơi chứa `knowledge_<task>.json` |
-| `FULL_TRANSCRIPTS_JSON_PATH` | không | Corpus text rộng (bằng chứng coverage) |
-| `RELEASE_HF_TRANSCRIPTS_JSON_PATH` | không | Corpus **có audio** (tạo sample mới) |
+| `FULL_TRANSCRIPTS_JSON_PATH` | không | Corpus `speech_sources.jsonl` (đầy đủ nhất, coverage) |
+| `RELEASE_HF_TRANSCRIPTS_JSON_PATH` | không | Corpus `speech_sources.jsonl` (cùng 1 file; audio path chuẩn hoá) |
 | `VIETNAMESE_SPEECH_QA_LOCAL_DIR` | không | `local_dir` tải Vietnamese-Speech-QA |
 | `HF_SPEECH_REPO` / `HF_SOUND_REPO` | không | Repo đích khi push |
 | `DEBATE_MODE` | không (mặc định `api`) | `api` (2 API tự debate) hoặc `manual` (copy-paste) |
@@ -166,6 +166,9 @@ bash run/benchmark_qa.sh inspect knowledge-status
 | `code-switching-mmsu` | Nhánh MMSU: `build-manifest` 111 sample Code-switching |
 | `inspect` | `tree` / `stats` / `sample` / `head` / `knowledge-status` |
 | `local-preprocess` | Tiền xử lý local-only (`--task tu-muon|tu-lay`) |
+| `build-tu-lay-csv` | Sinh file gộp `tu_lay.csv` (mọi loại láy, có cột `Loại láy`) -- xem §7.1 |
+| `cost-report` | Đọc `usage.jsonl` → báo cáo chi phí token theo stage/model -- xem §7.2 |
+| `check-deepseek` | Gọi thử DeepSeek (`deepseek-flash`/`deepseek-v4-pro`) kiểm tra kết nối |
 | `all` | sound + 4 task + code-switching (có `--skip-*`) |
 
 ### 2.5 Cờ dùng chung
@@ -381,3 +384,89 @@ RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
   Log có dòng `[FALLBACK] <vai>: <model lỗi> -> thử <model kế>`.
 - `PYTHONPATH` được `run/_lib.sh` tự trỏ vào `<repo>/src` để import
   `test_set.datasets_qa.translate_datasets.translate_dataset`.
+
+## 7. Từ láy gộp 1 file + chi phí token
+
+### 7.1 Input Từ láy: một file `tu_lay.csv`
+
+Input của task Từ láy nằm **cùng task dir** với output:
+`data/benchmark_qa/speech/cac_hien_tuong_dac_biet_trong_tieng_viet/tu_lay/tu_lay.csv`
+(gồm MỌI loại láy, cột `Loại láy` chú thích loại: `Láy toàn bộ`, `Láy toàn bộ (biến âm)`,
+`Láy vần (...)`, `Láy âm đầu`, `Láy khuyết âm`, `Láy ba tiếng`...). Tương tự, input Từ mượn nằm ở
+`.../tu_muon/` (`tu_muon_tieng_viet_viet_hoa.csv`, `asr_samples_with_tu_muon.json`).
+
+Sinh mở rộng file này (web + quy tắc láy toàn bộ + mine corpus + điền nghĩa bằng LLM):
+
+```bash
+PYTHONPATH=src .venv/bin/python src/main.py build-tu-lay-csv \
+  --tu-lay-dir data/benchmark_qa/speech/cac_hien_tuong_dac_biet_trong_tieng_viet/tu_lay \
+  --release-hf data/benchmark_qa/speech/speech_sources.jsonl \
+  --mine-corpus --fill-meaning
+# tuỳ chọn: --min-freq 2  --fill-batch-size 20  --fill-limit N  --env-file <path>
+```
+
+Quy tắc láy toàn bộ (theo Wiktionary *Phụ lục:Từ láy tiếng Việt*): nhân bản nguyên (`to to`),
+đổi thanh B/C→A cùng âm vực (`thối→thôi thối`, `nhẹ→nhè nhẹ`, `đỏ→đo đỏ`, `dễ→dề dễ`),
+âm cuối tắc→mũi đồng vị (`mập→mầm mập`, `nhạt→nhàn nhạt`, `lệch→lềnh lệch`, `điếc→điêng điếc`).
+
+`local-preprocess --task tu-lay` sẽ: lọc corpus 1 lần → tách 3 variant
+(`toan_bo` ← `Láy toàn bộ*`, `van` ← `Láy vần*`, `chung` ← phần còn lại) → sinh samples.
+Trường `loai_lay` đi vào metadata của sample và **chỉ xuất hiện ở `*_final_extended.jsonl`**,
+không có trong `*_final.jsonl` (do `finalize_qa.py` chỉ giữ schema publish).
+
+### 7.2 Log token + báo cáo chi phí
+
+Mọi lời gọi model qua `auto_model_relay.call_model` (debate, classify, generate, 2 lượt lọc) đều
+được ghi token vào `data/logs/benchmark_qa/<task>/usage.jsonl` (thread-safe, gitignore) bởi
+`usage_tracker.py`. Báo cáo:
+
+```bash
+PYTHONPATH=src .venv/bin/python src/main.py cost-report --task tu_lay --n-questions 500
+# hoặc gộp mọi task:
+PYTHONPATH=src .venv/bin/python src/main.py cost-report --all --extrapolate 1000
+```
+
+Kết quả: `cost_report.json` + `cost_report.md` cạnh `usage.jsonl`, gồm bảng theo **stage** và
+theo **model** (calls, input/output tokens, USD), tổng, và $/câu · $/1000 câu.
+
+**Bảng giá dùng để quy đổi** (`tools/pricing.py`, USD / 1M token; nguồn: ai.google.dev +
+developers.openai.com). Đây là chi phí **quy đổi** theo giá công bố; chạy qua proxy subscription
+thì chi tiêu thực tế có thể bằng 0.
+
+| Alias (model thực gọi) | Model giá | Input $/1M | Output $/1M |
+|---|---|---:|---:|
+| `ag/gemini-3.6-flash-low`, `ag/gemini-3.7-flash-low`, `ag/gemini-3.8-flash-low`, `ag/gemini-3.8-flash-medium` | gemini-3.6-flash | 1.50 | 7.50 |
+| `ag/gemini-3.8-flash-high` | gemini-3.1-pro-preview | 2.00 | 12.00 |
+| `cx/gpt-5.5`, `cl/openai/gpt-5.5` | gpt-5.5 | 5.00 | 30.00 |
+| `cx/gpt-5.6-luna`, `cl/openai/gpt-5.6-luna` | gpt-5.6-luna | 0.20 | 1.20 |
+| `cl/openai/gpt-5.4` | gpt-5.4 | 2.50 | 15.00 |
+| (Vertex) `gemini-2.5-flash` | gemini-2.5-flash | 0.30 | 2.50 |
+| (Vertex) `gemini-2.5-flash-lite` | gemini-2.5-flash-lite | 0.10 | 0.40 |
+| (Vertex) `gemini-2.5-pro` | gemini-2.5-pro | 1.25 | 10.00 |
+| `deepseek-flash` | deepseek-flash (peak) | 0.30 | 1.20 |
+| `deepseek-v4-pro` | deepseek-v4-pro (peak) | 1.32 | 3.96 |
+
+Các model khác có sẵn trong `PRICES` (`gemini-3.5-flash`, `gemini-3.5-flash-lite`,
+`gemini-3.1-flash-lite`, `gpt-5.4-mini`, `gpt-5.6-terra/sol/cyber`). Override giá bằng
+`--price-overrides price.json` dạng `{"model": [input, output]}`. DeepSeek off-peak = 50% giá peak.
+
+Test offline: `.venv/bin/python -m pytest tests/benchmark_qa/test_usage_cost.py -q`.
+
+### 7.3 Fallback cross-family DeepSeek + ngưỡng an toàn
+
+- **DeepSeek là fallback khác họ nhưng vẫn nằm TRONG vòng tròn backup** (`auto_model_relay`):
+  sau khi cạn pool cùng họ, tự nhảy sang DeepSeek (OpenAI-compatible, `https://api.deepseek.com`,
+  key `DEEPSEEK_API_KEY` trong `.env`; endpoint/model định nghĩa trong code).
+  - Vai **gemini** (và bước **sinh câu hỏi**) → `deepseek-flash`.
+  - Vai **openai** (debater) → `deepseek-v4-pro`.
+  - Nếu **cả 2 debater đều fail** → 2 vai dùng 2 model DeepSeek KHÁC NHAU (flash vs pro) → khách quan.
+  - Kiểm tra kết nối: `PYTHONPATH=src .venv/bin/python src/test_set/datasets_qa/benchmark_qa/tools/check_deepseek.py`
+- **Ngưỡng an toàn chi phí**:
+  - `--max-questions N` (mặc định **5000**, biến `MAX_QUESTIONS`): chặn tổng số câu hỏi sinh ra mỗi
+    lượt `generate-questions` (áp dụng `tu-lay`, `code-switching`; các task còn lại vốn đã nhỏ).
+  - `--max-units N` (biến `MAX_UNITS`, mặc định không chặn): chặn số `candidate_units/words` đưa
+    vào debate (`auto_model_relay run --max-units`), cắt deterministic.
+- **Aspect `muc_dich_su_dung`** (cả 3 variant từ láy): hỏi *"vì sao dùng từ láy này thay vì từ
+  đồng nghĩa sắc thái mạnh/nhẹ hơn?"*. Đáp án do **debate** sinh (`fields.muc_dich_su_dung`),
+  fallback rule-based (`_muc_dich_reason`). Nhiễu kiểu A: lý do của từ khác, thiếu thì bù domain
+  6 lý do chuẩn. `question_aspect` ghi rõ khía cạnh và **chỉ có ở `*_final_extended.jsonl`**.

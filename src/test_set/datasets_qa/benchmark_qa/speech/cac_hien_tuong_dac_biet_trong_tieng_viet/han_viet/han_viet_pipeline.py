@@ -59,6 +59,7 @@ sys.path.insert(0, str(_THIS_DIR.parents[3]))
 import auto_model_relay
 import env_paths
 import error_log
+import usage_tracker
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
 
@@ -139,6 +140,7 @@ def extract_target_word(r: dict) -> Optional[str]:
 
 
 def _classify_level_batch(client, model, batch, max_retries):
+    usage_tracker.set_context(task=TASK_NAME, stage="classify-levels")
     payload = [{"id": r["id"], "target_word": r["target_word"], "transcript": r["transcript"]} for r in batch]
     ids_sent = {r["id"] for r in batch}
     last_error = None
@@ -279,6 +281,7 @@ choices) -- không giải thích thêm, không markdown fence.
 
 
 def _gen_question_batch(client, model, batch, max_retries, system_prompt):
+    usage_tracker.set_context(task=TASK_NAME, stage="generate-questions")
     # batch: list[(id_ghep, record, target_level)]
     payload = [
         {
@@ -458,7 +461,7 @@ def fill_fields(multihop_path: Path, original_path: Path) -> None:
 # đó không hề có, nên classify-levels/generate-questions KHÔNG BAO GIỜ sinh được câu hỏi cho
 # những từ mới đó nếu chỉ đọc han_viet_qa.jsonl. Bước này lấp lỗ hổng: nhận input là output của
 # `hien_tuong_filter_pipeline.py build-samples` (quét 1 corpus THẬT SỰ CÓ AUDIO, ví dụ
-# release_hf_transcripts_by_dataset.json -- KHÔNG dùng full_transcripts.json vì file đó không có
+# speech_sources.jsonl (file đầy đủ nhất) vì file đó không có
 # field "audio") trên CSV do `apply_knowledge_graph.py` xuất ra từ knowledge graph, rồi build
 # thẳng record đã có max_level/historical_fact (lấy TỪ knowledge graph, không gọi Gemini lại vì
 # những từ này đã được 3-model debate xác thực) -- ghi THÊM (append) vào chính file
@@ -514,7 +517,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p0 = sub.add_parser("build-new-word-records", help="Ghép thêm record cho từ MỚI (knowledge graph) vào file --append-to của classify-levels.")
-    p0.add_argument("--samples", required=True, help="Output của hien_tuong_filter_pipeline.py build-samples (dùng corpus CÓ audio, ví dụ release_hf_transcripts_by_dataset.json).")
+    p0.add_argument("--samples", required=True, help="Output của hien_tuong_filter_pipeline.py build-samples (dùng corpus CÓ audio, ví dụ speech_sources.jsonl).")
     p0.add_argument("--list-key", default="han_viet_xuat_hien")
     p0.add_argument("--append-to", required=True, help="han_viet_difficulty_levels.jsonl (file --output của classify-levels -- ghi THÊM vào cuối).")
 

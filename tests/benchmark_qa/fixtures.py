@@ -37,7 +37,7 @@ def _write_csv(path: Path, columns: list[str], rows: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Corpus dùng chung (release_hf_transcripts_by_dataset.json + full_transcripts.json)
+# Corpus dùng chung: speech_sources.jsonl (file_name/text/dataset...)
 # ---------------------------------------------------------------------------------------------
 CORPUS = {
     DATASET: [
@@ -60,12 +60,15 @@ CORPUS = {
 def write_corpus(root: Path) -> None:
     speech = root / "benchmark_qa/speech"
     speech.mkdir(parents=True, exist_ok=True)
-    with open(speech / "release_hf_transcripts_by_dataset.json", "w", encoding="utf-8") as f:
-        json.dump(CORPUS, f, ensure_ascii=False, indent=2)
-    # full_transcripts.json (dạng list phẳng) -- dùng cho word-coverage-report của Hán Việt
-    flat = [{"dataset": DATASET, "transcript": s["transcript"], "source_file": "tiny"} for s in CORPUS[DATASET]]
-    with open(speech / "full_transcripts.json", "w", encoding="utf-8") as f:
-        json.dump(flat, f, ensure_ascii=False, indent=2)
+    # speech_sources.jsonl: corpus DUY NHẤT (thay full_transcripts.json + release_hf...json).
+    _write_jsonl(speech / "speech_sources.jsonl", [
+        {
+            "file_name": s["audio"], "text": s["transcript"], "dataset": DATASET,
+            "source_id": f"tiny-{i:03d}", "split": "test",
+            "original_file": s["audio"], "transcript_status": "authoritative",
+        }
+        for i, s in enumerate(CORPUS[DATASET])
+    ])
     # test_speech.jsonl -- runner đọc tại <root>/Vietnamese-Speech-QA/test_speech.jsonl (khớp
     # TEST_SPEECH_JSONL trong _lib.sh), dùng cho han_viet fill-fields (id khớp source_id).
     _write_jsonl(root / "Vietnamese-Speech-QA" / "test_speech.jsonl", [
