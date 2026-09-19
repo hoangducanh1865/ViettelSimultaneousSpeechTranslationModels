@@ -1,0 +1,4 @@
+{"id": "cs-00000", "text": "hôm nay tôi dùng wifi và gửi email", "audio": "release_hf/16k/tiny_ds/a1.wav", "cs_terms": ["wifi", "email"], "dataset_source": "GigaSpeech"}
+{"id": "cs-00001", "text": "tôi mua hàng online", "audio": "release_hf/16k/tiny_ds/a2.wav", "cs_terms": ["online"], "dataset_source": "GigaSpeech"}
+{"id": "cs-00002", "segment_text": "dùng thuốc paracetamol", "cs_terms": ["paracetamol"], "audio": "release_hf/16k/tiny_ds/a3.wav", "text": "dùng thuốc paracetamol", "dataset_source": "ViMed_Hard"}
+{"id": "cs-00003", "segment_text": "bệnh nhân cần đo ct scanner", "cs_terms": ["ct scanner"], "audio": "release_hf/16k/tiny_ds/a3.wav", "text": "bệnh nhân cần đo ct scanner", "dataset_source": "ViMed"}

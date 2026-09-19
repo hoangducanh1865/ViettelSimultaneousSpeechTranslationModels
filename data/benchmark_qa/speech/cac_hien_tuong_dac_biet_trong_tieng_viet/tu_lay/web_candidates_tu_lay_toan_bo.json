@@ -1,0 +1,21 @@
+[
+  {"word": "xanh xanh", "note": "toàn bộ, base 'xanh' -- giảm nhẹ mức độ màu xanh"},
+  {"word": "đỏ đỏ", "note": "toàn bộ, base 'đỏ' -- giảm nhẹ mức độ màu đỏ"},
+  {"word": "tím tím", "note": "toàn bộ, base 'tím' -- giảm nhẹ mức độ màu tím"},
+  {"word": "hồng hồng", "note": "toàn bộ, base 'hồng' -- giảm nhẹ mức độ màu hồng"},
+  {"word": "trăng trắng", "note": "toàn bộ (biến âm), base 'trắng' -- giảm nhẹ mức độ màu trắng"},
+  {"word": "đo đỏ", "note": "toàn bộ (biến âm), base 'đỏ' -- giảm nhẹ mức độ màu đỏ"},
+  {"word": "xa xa", "note": "toàn bộ, base 'xa' -- giảm nhẹ mức độ khoảng cách"},
+  {"word": "luôn luôn", "note": "toàn bộ, base 'luôn' -- tăng mức độ nhấn mạnh tính liên tục"},
+  {"word": "ào ào", "note": "toàn bộ, base 'ào' -- tăng mức độ, mô phỏng âm thanh dồn dập"},
+  {"word": "hằm hằm", "note": "toàn bộ, base 'hằm' -- tăng mức độ vẻ mặt tức giận"},
+  {"word": "rưng rưng", "note": "toàn bộ, base 'rưng' -- tăng mức độ, sắp khóc"},
+  {"word": "mơn mởn", "note": "toàn bộ (biến âm), base 'mởn' -- tươi tốt, tràn đầy sức sống"},
+  {"word": "lanh lảnh", "note": "toàn bộ (biến âm), base 'lảnh' -- âm thanh cao, vang"},
+  {"word": "thoang thoảng", "note": "toàn bộ (biến âm), base 'thoảng' -- giảm nhẹ mức độ mùi hương"},
+  {"word": "dành dành", "note": "toàn bộ, base 'dành' -- tên loài cây/hoa"},
+  {"word": "khom khom", "note": "toàn bộ, base 'khom' -- giảm nhẹ mức độ dáng khom lưng"},
+  {"word": "bừng bừng", "note": "toàn bộ, base 'bừng' -- tăng mức độ, sáng rực/nóng bừng"},
+  {"word": "nhan nhản", "note": "toàn bộ (biến âm), base 'nhản'/'nhan' -- rất nhiều, tràn lan"},
+  {"word": "ngoan ngoãn", "note": "toàn bộ (biến âm), base 'ngoan' -- tăng mức độ vâng lời"}
+]

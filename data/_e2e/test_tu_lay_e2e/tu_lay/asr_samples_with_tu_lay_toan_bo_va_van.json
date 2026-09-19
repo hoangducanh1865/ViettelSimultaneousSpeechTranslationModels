@@ -1,0 +1,70 @@
+[
+  {
+    "transcript": "trời xanh xao và mát mẻ, tôi thấy tươi tắn sáng sủa, nhè nhẹ mạnh mẽ, đẹp đẽ lạnh lẽo, cô ấy lúng túng và vội vàng, mô tê răng rứa hen",
+    "audio_filepath": "release_hf/16k/tiny_ds/a4.wav",
+    "dataset": "tiny_ds",
+    "source_file": "release_hf_transcripts_by_dataset.json",
+    "tu_lay_xuat_hien": [
+      {
+        "tu": "lúng túng",
+        "phan_loai": "Láy vần (ung)",
+        "y_nghia": "vụng về",
+        "sac_thai_bieu_dat": "giảm nhẹ"
+      },
+      {
+        "tu": "xanh xao",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "màu xanh nhạt",
+        "sac_thai_bieu_dat": "giảm nhẹ"
+      },
+      {
+        "tu": "tươi tắn",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "tươi vui",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "sáng sủa",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "sáng rõ",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "lạnh lẽo",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "rất lạnh",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "vội vàng",
+        "phan_loai": "Láy vần (ang)",
+        "y_nghia": "gấp gáp",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "nhè nhẹ",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "rất nhẹ",
+        "sac_thai_bieu_dat": "giảm nhẹ"
+      },
+      {
+        "tu": "mạnh mẽ",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "rất mạnh",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "mát mẻ",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "mát mẻ dễ chịu",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      },
+      {
+        "tu": "đẹp đẽ",
+        "phan_loai": "Láy toàn bộ",
+        "y_nghia": "đẹp rõ ràng",
+        "sac_thai_bieu_dat": "tăng mạnh"
+      }
+    ]
+  }
+]

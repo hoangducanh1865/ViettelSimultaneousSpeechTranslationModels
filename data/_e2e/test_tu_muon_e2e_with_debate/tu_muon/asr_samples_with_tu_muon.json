@@ -1,0 +1,53 @@
+[
+  {
+    "transcript": "hôm nay tôi uống cà phê và ăn bánh mì ở ga tàu",
+    "audio_filepath": "release_hf/16k/tiny_ds/a1.wav",
+    "dataset": "tiny_ds",
+    "source_file": "release_hf_transcripts_by_dataset.json",
+    "tu_muon_xuat_hien": [
+      {
+        "tu": "bánh mì",
+        "tu_goc": "pain",
+        "ngon_ngu_nguon_goc": "Pháp",
+        "nhom_linh_vuc": "ẩm thực",
+        "y_nghia_ghi_chu": "bánh nướng"
+      },
+      {
+        "tu": "cà phê",
+        "tu_goc": "café",
+        "ngon_ngu_nguon_goc": "Pháp",
+        "nhom_linh_vuc": "ẩm thực",
+        "y_nghia_ghi_chu": "đồ uống có caffeine"
+      },
+      {
+        "tu": "ga",
+        "tu_goc": "gare",
+        "ngon_ngu_nguon_goc": "Pháp",
+        "nhom_linh_vuc": "giao thông",
+        "y_nghia_ghi_chu": "nhà ga"
+      }
+    ]
+  },
+  {
+    "transcript": "tôi giặt xà phòng và xem tivi buổi tối",
+    "audio_filepath": "release_hf/16k/tiny_ds/a2.wav",
+    "dataset": "tiny_ds",
+    "source_file": "release_hf_transcripts_by_dataset.json",
+    "tu_muon_xuat_hien": [
+      {
+        "tu": "xà phòng",
+        "tu_goc": "savon",
+        "ngon_ngu_nguon_goc": "Pháp",
+        "nhom_linh_vuc": "vệ sinh",
+        "y_nghia_ghi_chu": "chất tẩy rửa"
+      },
+      {
+        "tu": "tivi",
+        "tu_goc": "television",
+        "ngon_ngu_nguon_goc": "Anh",
+        "nhom_linh_vuc": "điện tử",
+        "y_nghia_ghi_chu": "máy thu hình"
+      }
+    ]
+  }
+]

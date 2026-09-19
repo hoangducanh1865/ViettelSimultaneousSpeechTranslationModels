@@ -1,0 +1,2094 @@
+[Relay tri thức tự động -- task=code_switching] Lượt cho model: GEMINI
+
+Bạn và 1 AI khác (luân phiên) đang RÀ SOÁT metadata cho các thuật ngữ code-switching (từ nước ngoài chêm vào câu tiếng Việt) xuất hiện trong các sample audio dưới đây. Với MỖI sample (có thể có NHIỀU thuật ngữ cùng lúc, liệt kê trong "cs_terms"), hãy:
+1. (Đa từ) Nếu sample có >=2 thuật ngữ: xác định chúng có liên hệ với nhau không (cùng lĩnh vực/chủ đề?) -- quyết định nên hỏi RIÊNG từng từ hay hỏi QUAN HỆ giữa chúng (hoặc cả hai), ghi vào top-level "sample_relations": [{"sample_id", "terms", "question_strategy": "per_term"|"relational"|"both", "relation_fact"}].
+2. (Đếm & từ loại) Với MỖI thuật ngữ (đưa vào "words", key theo đúng chữ xuất hiện trong transcript): thuật ngữ đóng vai trò từ loại gì trong câu (fields.pos_role_typical: "noun"|"verb"|"adjective"|"other")? Nếu là ĐỘNG TỪ/TÍNH TỪ: mô tả nó làm thay đổi ý định/sắc thái câu như thế nào (fields.sentiment_impact_note, else null).
+3. (Tri thức nền) fields.domain (thuật ngữ thuộc lĩnh vực/hệ thống nào -- thực phẩm, bệnh lý, công nghệ, thể thao...) và fields.knowledge_fact (1 dữ kiện THẬT ngắn gọn để hỏi được ứng dụng/cấu tạo, CHỈ điền nếu chắc chắn, else null).
+4. (Việt hóa) fields.vi_localized_term: nếu thuật ngữ này được dịch/Việt hóa CHUẨN XÁC theo đúng chuyên ngành thì là gì (null nếu không có bản dịch chuẩn/không nên dịch).
+5. (Rủi ro ASR) fields.asr_risk_level ("low"|"medium"|"high") và fields.asr_risk_reason: nếu hệ thống nhận diện giọng nói nghe NHẦM từ này (thành từ phát âm gần giống), hậu quả/sai lệch ngữ nghĩa nghiêm trọng đến mức nào và TẠI SAO -- áp dụng cho MỌI loại thuật ngữ (tên riêng/thuật ngữ chuyên ngành/từ thông dụng), không chỉ domain y khoa.
+Đồng thời tinh chỉnh "rules" (multi_term_policy/count_classify/semantic_impact/knowledge_grounding/localization/asr_risk), mỗi key có "description" mô tả luật áp dụng chung cho pha sinh câu hỏi hàng loạt sau này.
+
+KẾT THÚC câu trả lời của bạn bằng ĐÚNG 1 trong 2 dòng sau (không viết gì khác sau dòng này):
+  "CONSENSUS: FINAL" -- nếu bạn thấy knowledge graph đã đủ tốt, không cần sửa thêm.
+  "CONSENSUS: CONTINUE" -- nếu bạn vừa sửa/thêm gì đó và muốn model tiếp theo xem lại.
+Luôn trả về TOÀN BỘ knowledge graph (không phải diff) trong 1 khối ```json ... ``` duy nhất, đúng schema đã cho.
+QUAN TRỌNG -- JSON phải hợp lệ 100%: khi cần trích dẫn/nhấn mạnh 1 từ/cụm từ bên trong 1 chuỗi text (fields.description, fields.notes, v.v.), dùng dấu nháy ĐƠN ' ' (ví dụ: từ 'cop'), TUYỆT ĐỐI không dùng dấu nháy kép " " bên trong 1 chuỗi JSON vì sẽ làm gãy cú pháp JSON. Dấu nháy đơn ' KHÔNG cần và KHÔNG được thêm dấu \ phía trước (viết đúng là 'cop', SAI là \'cop\' -- ký tự \' KHÔNG PHẢI escape hợp lệ trong JSON, chỉ \" mới hợp lệ, và cũng chỉ dùng khi thật sự bắt buộc).
+
+SCHEMA đích (trả về ĐÚNG dạng này):
+{
+  "schema_version": "1.0", "task": "<task>", "variant": "<variant or null>",
+  "generated_at": "<ISO8601>",
+  "relay_meta": {"model_order": [...], "rounds_completed": int, "max_rounds": int,
+                 "stopped_reason": "consensus"|"max_rounds", "consensus_round": int|null},
+  "words": [{"word": str, "status": "confirmed"|"corrected"|"added"|"rejected",
+             "source": "existing_csv"|"web_research"|"corpus_scan"|"model_proposed",
+             "fields": {...tuy task...}, "extra_fields": {...}, "notes": str}],
+  "rules": {"level_1": {"description": str, "distractor_strategy": str}, "level_2": {...},
+            "level_3": {...}, "cloze_toan_bo": {...} (chỉ tu_lay/toan_bo),
+            "van_new_mechanic": {"enabled": bool, ...} (chỉ tu_lay/van),
+            "chung_new_mechanic": {"enabled": bool, ...} (chỉ tu_lay/chung)}
+}
+
+DANH SÁCH SAMPLE (mỗi sample có transcript + TOÀN BỘ thuật ngữ xuất hiện CÙNG câu đó, để giữ ngữ cảnh liên hệ giữa các thuật ngữ):
+[
+  {
+    "sample_id": "cs-00000",
+    "transcript": "phần trăm cái giá trị của cái cái cái tiền đô la ở bên mỹ thì nó cũng y chang dị nó mất cái giá trị ấy xung quanh thế giới hết trơn luôn chứ không phải là bên mỹ không bởi vì á là nhiều công ty á mấy thằng mà ceo với mấy thằng chủ tịch mấy công ty lớn đó",
+    "cs_terms": [
+      "ceo"
+    ]
+  },
+  {
+    "sample_id": "cs-00001",
+    "transcript": "thưa quý vị tờ guardian vừa đưa tin vua charles đệ tam sẽ không tham dự hội nghị thượng đỉnh của liên hiệp quốc cop hai mươi bảy diễn ra ở ai cập vào tháng sau theo đề nghị của thủ tướng anh liz truss",
+    "cs_terms": [
+      "guardian",
+      "charles",
+      "cop",
+      "liz",
+      "truss"
+    ]
+  },
+  {
+    "sample_id": "cs-00002",
+    "transcript": "ngược lại haaland là tiền đạo có kích cỡ bự hàng đầu xứ sở sương mù khi kết quả đo đạc của anh là một mét chín mươi sáu",
+    "cs_terms": [
+      "haaland"
+    ]
+  },
+  {
+    "sample_id": "cs-00003",
+    "transcript": "kể từ khi chuyển đến sân emirates trải qua mười trận đấu trên mọi đấu trường jesus đã ghi được năm bàn thắng tỷ lệ gần bốn mươi phần trăm số bàn của mùa giải trước",
+    "cs_terms": [
+      "emirates",
+      "jesus"
+    ]
+  },
+  {
+    "sample_id": "cs-00004",
+    "transcript": "ấy thế mà anh chàng to xác này còn được tiếp đạn bởi những máy nổi bóng hàng đầu thế giới như joão cancelo hay kevin de bruyne",
+    "cs_terms": [
+      "joão",
+      "cancelo",
+      "kevin",
+      "bruyne"
+    ]
+  },
+  {
+    "sample_id": "cs-00005",
+    "transcript": "công thức linh hoạt chống nứt và sắc tố chống tia cực tím của kết xuất silicon hoặc acrylic cho phép các khu vực rộng lớn được kết xuất liền mạch với độ nhất quán màu hoàn hảo",
+    "cs_terms": [
+      "silicon",
+      "acrylic"
+    ]
+  },
+  {
+    "sample_id": "cs-00006",
+    "transcript": "thưa quý vị hạ viện mỹ mới đây đã thông qua nghị quyết ủng hộ thụy điển và phần lan gia nhập tổ chức hiệp ước bắc đại tây dương nato nghị quyết trên được thông qua với tỷ lệ ủng hộ áp đảo là ba trăm chín mươi tư phiếu thuận và mười tám phiếu trống",
+    "cs_terms": [
+      "nato"
+    ]
+  },
+  {
+    "sample_id": "cs-00007",
+    "transcript": "phi yến chào mừng quý vị cùng đến với chương trình tạp chí ngân hàng trên kênh truyền hình fbnc và như thường lệ trước khi đi vào phần tin chi tiết chúng ta hãy cùng điểm qua những nội dung nổi bật của chương trình kỳ này",
+    "cs_terms": [
+      "fbnc"
+    ]
+  },
+  {
+    "sample_id": "cs-00008",
+    "transcript": "hôm nay thì được tặng ba con bò cho bà con là đặc biệt khó khăn ở à bản bu prăng hai này là là để nuôi con bò nhằm mục đích để phát triển kinh tế xã hội ở địa phương đặc biệt là vùng sâu vùng xa vùng đặc biệt khó khăn vùng biên giới",
+    "cs_terms": [
+      "prăng"
+    ]
+  },
+  {
+    "sample_id": "cs-00009",
+    "transcript": "ok nó không hiểu á là nó nói nó nó cười rằng á là anh đã bảo rằng á là mình đang ở trong cái thị trường trâu mình đang thị trường trâu mình đang thị trường trâu đừng có mua nữa đừng có mua nữa",
+    "cs_terms": [
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00010",
+    "transcript": "cá hồi có thể được sử dụng để làm các món như là sushi sasimi hoặc là nhiều món ăn khác nhau mà cô bác mỗi khi đi vào nhà hàng nhật bản thì chắc chắn đều sẽ bắt gặp",
+    "cs_terms": [
+      "sushi",
+      "sasimi"
+    ]
+  },
+  {
+    "sample_id": "cs-00011",
+    "transcript": "một thông tin có lợi cho cô bác nào ở đây đang mắc bệnh tiểu đường đó là kháng tinh bột trong chuối xanh có khả năng cải thiện độ nhạy của insulin điều này rất có ý nghĩa với bệnh nhân tiểu đường tuýp hai",
+    "cs_terms": [
+      "insulin"
+    ]
+  },
+  {
+    "sample_id": "cs-00012",
+    "transcript": "nhưng mà tất nhiên nếu như em là người mà chơi game nhiều gọi là muốn gaming phone muốn hack core thì nên lấy là là k năm mươi utral nó sẽ là hợp lý hơn khi có pin trâu này sạc nhanh hơn này rồi là màn to hơn này kiểu kiểu như vậy ha",
+    "cs_terms": [
+      "game",
+      "gaming",
+      "phone",
+      "hack",
+      "core",
+      "utral"
+    ]
+  },
+  {
+    "sample_id": "cs-00013",
+    "transcript": "ông woo cho biết nhà chức trách hàng không philippines đang phối hợp cùng với nhà chức trách hàn quốc để tiến hành cuộc điều tra kỹ lượng nhằm xác định nguyên nhân sự cố",
+    "cs_terms": [
+      "woo",
+      "philippines"
+    ]
+  },
+  {
+    "sample_id": "cs-00014",
+    "transcript": "cách đây năm năm hợp tác xã khiết tâm đã xây dựng cánh đồng mẫu lớn áp dụng quy trình thực hành nông nghiệp tốt toàn cầu global gap cho toàn bộ diện tích sản xuất lúa",
+    "cs_terms": [
+      "global",
+      "gap"
+    ]
+  },
+  {
+    "sample_id": "cs-00015",
+    "transcript": "ngoài ra thì với vn ba mươi nhà đầu tư cần phải lưu ý ba điều sau đây",
+    "cs_terms": [
+      "vn"
+    ]
+  },
+  {
+    "sample_id": "cs-00016",
+    "transcript": "số hóa để nhà đầu tư có thể mở tài khoản online hay là thuận tiện cho việc rút hoặc là nộp tiền á thì nó cũng sẽ là những cái yếu tố mà nên cân nhắc",
+    "cs_terms": [
+      "online"
+    ]
+  },
+  {
+    "sample_id": "cs-00017",
+    "transcript": "trong đó có cả việc anh đã thuê người yểm bùa đồng đội chung tuyển là kylian mbappe",
+    "cs_terms": [
+      "kylian",
+      "mbappe"
+    ]
+  },
+  {
+    "sample_id": "cs-00018",
+    "transcript": "vì vậy dự án wu dao ngộ đạo phiên bản một chấm không ra đời công trình này là kết quả đóng góp của baai cùng hơn một trăm nhà khoa học ai khác từ đại học bắc kinh thanh hoa renmin học viện khoa học trung quốc và nhiều học viện khác",
+    "cs_terms": [
+      "wu",
+      "baai",
+      "renmin"
+    ]
+  },
+  {
+    "sample_id": "cs-00019",
+    "transcript": "ông kashkari cho rằng nền kinh tế sẽ trở lại môi trường giá cả bình thường khi điều chỉnh mở cửa trở lại hồi cuối tháng sáu hai ngàn không trăm hai mươi mốt ông kashkari dự báo các chỉ số lạm phát tăng gần đây chỉ là tạm thời",
+    "cs_terms": [
+      "kashkari",
+      "kashkari"
+    ]
+  },
+  {
+    "sample_id": "cs-00020",
+    "transcript": "kính thưa quý vị ờ tiêu điểm của tạp chí ngân hàng kỳ này chúng tôi muốn nhắc đến kiến nghị mới nhất liên quan đến hành lang pháp lý về cho vay ngang hàng giữa các tổ chức tín dụng và công ty tài chính công nghệ fintech",
+    "cs_terms": [
+      "fintech"
+    ]
+  },
+  {
+    "sample_id": "cs-00021",
+    "transcript": "bất chấp việc bộ tứ sa sút rất nhiều từ đầu mùa jurgen klopp cũng chẳng có trong tay những phương án tốt hơn vào lúc này",
+    "cs_terms": [
+      "jurgen",
+      "klopp"
+    ]
+  },
+  {
+    "sample_id": "cs-00022",
+    "transcript": "xây dựng nên rồi bỏ cả một đống tiền ra cũng đi bằng vay mượn ngân hàng chứ không phải là tiền vốn của chúng em có chủ các homestay là cũng họp nhau lại thì cũng nói nhiều về vấn đề này xin các cấp các ban các ngành ý là cho là",
+    "cs_terms": [
+      "homestay"
+    ]
+  },
+  {
+    "sample_id": "cs-00023",
+    "transcript": "trong kinh thánh nói ban đầu adam và eva cư trú nơi vườn địa đàng trong kinh phật còn nói nhân loại lúc ban sơ sinh sống ở quang âm thiên hai nơi đó đều trên thái dương hệ nhưng ở không gian cao hơn",
+    "cs_terms": [
+      "adam",
+      "eva"
+    ]
+  },
+  {
+    "sample_id": "cs-00024",
+    "transcript": "sau khi làm với bên chỗ greenpan mình cũng muốn tìm hiểu thêm về smarthome là như thế nào để nó điều chỉnh cái nhiệt độ trong văn phòng",
+    "cs_terms": [
+      "greenpan",
+      "smarthome"
+    ]
+  },
+  {
+    "sample_id": "cs-00025",
+    "transcript": "đội bóng đến từ đảo síp được đánh giá là miếng mồi ngon để đoàn quân huấn luyện viên erik ten hag tìm lại niềm vui chiến thắng sau kết quả đáng buồn trước manchester city",
+    "cs_terms": [
+      "erik",
+      "hag",
+      "manchester",
+      "city"
+    ]
+  },
+  {
+    "sample_id": "cs-00026",
+    "transcript": "dạ ờ chúng ta nói ngay đến cái vấn đề trao đổi ngày hôm nay đó là ờ đồng euro giảm giá một cái ờ sự kiện khá là có thể nói là lịch sử đi anh ha",
+    "cs_terms": [
+      "euro"
+    ]
+  },
+  {
+    "sample_id": "cs-00027",
+    "transcript": "chúng ta có thể chườm ấm bằng khăn ấm lên mắt có thể làm giảm các triệu chứng sưng đỏ và đau nhức ngoài ra chúng ta cần cung cấp dưỡng chất cần thiết cho đôi mắt nhờ những thực phẩm chứa omega ba vitamin a và vitamin c nên khám mắt định kỳ để tầm soát bệnh về mắt",
+    "cs_terms": [
+      "omega",
+      "vitamin",
+      "vitamin"
+    ]
+  },
+  {
+    "sample_id": "cs-00029",
+    "transcript": "chiến lược gia người đức đã tạo ra hàng loạt sự thay đổi cả về con người lẫn chiến thuật để xốc lại tinh thần của the kop với chiến thắng hai không trước rangers tại champions league giữa tuần qua",
+    "cs_terms": [
+      "kop",
+      "rangers",
+      "champions",
+      "league"
+    ]
+  },
+  {
+    "sample_id": "cs-00030",
+    "transcript": "và và ừ như anh cũng vừa nói đó là có đội đội ngũ công nghệ của việt nam và hiện nay đang a bắt kịp cái trend này rất là nhanh so với thế giới",
+    "cs_terms": [
+      "trend"
+    ]
+  },
+  {
+    "sample_id": "cs-00031",
+    "transcript": "wow công nghệ làm tay máy à à à cái này ấy mình nghĩ là nó sẽ hỗ trợ cho việc những cái người nào mà bị khuyết tật ở tay cái này là nó đang dựa theo cái hệ thần kinh này mình nghĩ là",
+    "cs_terms": [
+      "wow"
+    ]
+  },
+  {
+    "sample_id": "cs-00033",
+    "transcript": "sự xuất hiện của những tân binh giúp arsenal gia tăng sức mạnh đáng kể đã xuất hiện không ít những sắc màu mới trong lối chơi của pháo thủ",
+    "cs_terms": [
+      "arsenal"
+    ]
+  },
+  {
+    "sample_id": "cs-00034",
+    "transcript": "anh ấy là anh tùng anh anh cũng mới bán hay là mới đăng bán thì phải cái con fold ba của anh ấy các bạn biết anh bán bao nhiêu bán có hai mươi triệu thôi tất nhiên dùng điện thoại nó phải lỗ là đúng rồi chứ nếu mà muốn giữ giá thì phải thì mua vàng đúng không ạ nhưng vấn đề ở đây là gì",
+    "cs_terms": [
+      "fold"
+    ]
+  },
+  {
+    "sample_id": "cs-00035",
+    "transcript": "xúc xích tiệt trùng đã trở thành món ăn nhanh thường ngày cho cả trẻ em và người lớn bổ sung nhanh năng lượng dinh dưỡng đạm sắt kẽm và các vitamin cần thiết có trong thịt",
+    "cs_terms": [
+      "vitamin"
+    ]
+  },
+  {
+    "sample_id": "cs-00036",
+    "transcript": "như chạm vào ứng dụng rồi bung ra rồi cái này cái nọ cái lọ cái chai các kiểu thậm chí truy cập vào camera tốc độ load mọi thứ nó như thế nào mọi thứ đều quá nhanh như thế nào xử lý chụp hình rồi quay video xong nó ngon như thế nào",
+    "cs_terms": [
+      "camera",
+      "load",
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00037",
+    "transcript": "đáng nói khi cá muối đã được who xếp vào nhóm một cùng nhóm với rượu độc tố nấm mốc aflatoxin",
+    "cs_terms": [
+      "who",
+      "aflatoxin"
+    ]
+  },
+  {
+    "sample_id": "cs-00038",
+    "transcript": "cả pectin và kháng tinh bột có thể làm giảm lượng đường trong máu của chúng ta sau bữa ăn và làm giảm cảm giác thèm ăn bằng cách làm chậm quá trình làm rỗng dạ dày",
+    "cs_terms": [
+      "pectin"
+    ]
+  },
+  {
+    "sample_id": "cs-00039",
+    "transcript": "kịch bản khủng hoảng ở các nước khác như malaysia indonesia hàn quốc hồng kông đều diễn ra với những nét tương đồng tuy nhiên hậu quả thì mỗi nơi mỗi khác phụ thuộc do khả năng ứng phó trong điều kiện khủng hoảng của chính phủ cũng như năng lực cơ cấu của nền kinh tế",
+    "cs_terms": [
+      "malaysia",
+      "indonesia",
+      "kông"
+    ]
+  },
+  {
+    "sample_id": "cs-00040",
+    "transcript": "như vậy thì nếu như mà ta hình dung rằng cái metaverse là một cái thế giới siêu ảo như vậy á thì ra đường á thì người ta nhìn thấy toàn những cái con robot",
+    "cs_terms": [
+      "metaverse",
+      "robot"
+    ]
+  },
+  {
+    "sample_id": "cs-00041",
+    "transcript": "vào cuối tháng tám năm hai không hai hai ngoại trưởng nga sergei lavrov cho biết nga và iran đang hoàn thiện một văn kiện toàn diện về hợp tác giữa hai nước",
+    "cs_terms": [
+      "sergei",
+      "lavrov",
+      "iran"
+    ]
+  },
+  {
+    "sample_id": "cs-00042",
+    "transcript": "và người ta bị bắt ở trong một cái cái điều kiện gì khó khăn kiểu như là thiên tai mà xảy ra bão lụt xong hoặc là ư ngay cả dịch bệnh covid á",
+    "cs_terms": [
+      "covid"
+    ]
+  },
+  {
+    "sample_id": "cs-00043",
+    "transcript": "nhưng theo quan điểm của chúng tôi pep guardiola và các học trò khó có thể xem là đội bóng cuốn hút nhất",
+    "cs_terms": [
+      "pep",
+      "guardiola"
+    ]
+  },
+  {
+    "sample_id": "cs-00044",
+    "transcript": "việc tiêu thụ hai khẩu phần cá hồi nuôi mỗi tuần đẫ làm tăng nồng độ omega ba trong máu",
+    "cs_terms": [
+      "đẫ",
+      "omega"
+    ]
+  },
+  {
+    "sample_id": "cs-00046",
+    "transcript": "tuy nhiên đó là cô bác chưa biết đó thôi chuối khi mà được luộc chín có chứa nhiều chất xơ hàm lượng pectin cũng tăng lên rất nhiều",
+    "cs_terms": [
+      "pectin"
+    ]
+  },
+  {
+    "sample_id": "cs-00047",
+    "transcript": "theo nhận định của công ty chuyên về phần mềm an ninh mạng và diệt virus bitdefender thì từ đầu năm đến nay thì tội phạm mạng đã lợi dụng tình hình mà ngày càng nhiều người làm việc từ xa do covid mười chín để xâm nhập vào các hệ thống",
+    "cs_terms": [
+      "virus",
+      "bitdefender",
+      "covid"
+    ]
+  },
+  {
+    "sample_id": "cs-00048",
+    "transcript": "trong bài phát biểu hôm hai mươi ba tháng mười tổng thống ukraine volodymyr zelensky tuyên bố bất cứ nơi nào nga mang đến thương vong và suy thoái thì ở nơi đó ukraine đều đang trở lại cuộc sống bình thường",
+    "cs_terms": [
+      "ukraine",
+      "volodymyr",
+      "zelensky",
+      "ukraine"
+    ]
+  },
+  {
+    "sample_id": "cs-00049",
+    "transcript": "đây là lúc để giới lãnh đạo doanh nghiệp các nhà đầu tư hiểu rõ rủi ro đang gia tăng trong bối cảnh lạm phát tăng quá cao và cục dự trữ liên bang mỹ fed quyết liệt thắt chặt chính sách tiền tệ",
+    "cs_terms": [
+      "fed"
+    ]
+  },
+  {
+    "sample_id": "cs-00050",
+    "transcript": "sắc lệnh của ông zelensky được đưa ra trong bối cảnh quân đội ukraine phá vỡ phòng tuyến nga ở miền nam đất nước và mở rộng phạm vi cuộc phản công ở miền đông giành lại nhiều vùng lãnh thổ ở các khu vực mà nga sáp nhập",
+    "cs_terms": [
+      "zelensky",
+      "ukraine"
+    ]
+  },
+  {
+    "sample_id": "cs-00051",
+    "transcript": "àm cái thứ hai nữa là cái a à dragon capital là cái công ty mà",
+    "cs_terms": [
+      "dragon",
+      "capital"
+    ]
+  },
+  {
+    "sample_id": "cs-00052",
+    "transcript": "thưa quý vị các bạn ngay trong đêm ngày hai bảy tháng chín th thành phố đà nẵng đã có xuất hiện nhiều trận mưa to và rất to kèm theo gió gió giật mạnh ờ ờ mưa to đã khiến nhiều tuyến đường trên thành phố đà nẵng bị ngập sâu nhiều cây xanh bị ngã đổ",
+    "cs_terms": [
+      "th"
+    ]
+  },
+  {
+    "sample_id": "cs-00053",
+    "transcript": "theo một nguồn tin thân cận trước khi đưa ra quyết định charles đệ tam đã suy nghĩ rất kĩ về chuyến công du nước ngoài đầu tiên của mình trên cương vị là quốc vương anh",
+    "cs_terms": [
+      "charles"
+    ]
+  },
+  {
+    "sample_id": "cs-00054",
+    "transcript": "minh đức xin kính chào quý khán giả của ngẫm radio các bạn thân mến những điều minh đức vừa liệt kê thật đáng kinh ngạc phải không trung hoa xưa được mệnh danh là mảnh đất thần châu với năm nghìn năm văn hóa từng được xem là một trong bốn nền văn minh vĩ đại nhất của nhân loại",
+    "cs_terms": [
+      "radio"
+    ]
+  },
+  {
+    "sample_id": "cs-00055",
+    "transcript": "thì à dự kiến là vào đợt mười tháng mười thì nó sale trong tầm dưới bốn thôi có màn amoled rồi là chín mươi hez tần số quét có loa kép rồi là highred audio pin năm ngàn sạc ba ba oát",
+    "cs_terms": [
+      "sale",
+      "amoled",
+      "hez",
+      "highred",
+      "audio"
+    ]
+  },
+  {
+    "sample_id": "cs-00056",
+    "transcript": "tất cả mọi người trên mạng lưới bitcoin đều có thể quan sát các giao dịch từ mới nhất cho đến đầu tiên",
+    "cs_terms": [
+      "bitcoin"
+    ]
+  },
+  {
+    "sample_id": "cs-00057",
+    "transcript": "thực ra là người dùng việt nam cũng rất là nhạy bén với công nghệ mới đối với họ linh hoạt thay đổi nhanh lắm bắt trend nhanh lắm",
+    "cs_terms": [
+      "trend"
+    ]
+  },
+  {
+    "sample_id": "cs-00058",
+    "transcript": "nhưng a sau cuộc họp thì tất cả các nhóm cổ phiếu chính của snp năm trăm đều được mua vào ngoại trừ nhóm năng lượng thì bị bán ra",
+    "cs_terms": [
+      "snp"
+    ]
+  },
+  {
+    "sample_id": "cs-00059",
+    "transcript": "harry kane sẽ là người lùi xuống nhận bóng và xẻ nách hàng thủ arsenal bằng những quả chọc khe chết người của anh",
+    "cs_terms": [
+      "harry",
+      "kane",
+      "arsenal"
+    ]
+  },
+  {
+    "sample_id": "cs-00060",
+    "transcript": "nói thêm một chút về top mười của forbes có một điều đáng chú ý trong danh sách này là chỉ có một người duy nhất là carlos alcaraz",
+    "cs_terms": [
+      "top",
+      "forbes",
+      "carlos",
+      "alcaraz"
+    ]
+  },
+  {
+    "sample_id": "cs-00061",
+    "transcript": "trong lần đầu ra mắt các cổ động viên của liverpool tại trận tranh siêu cúp community shield gặp manchester city",
+    "cs_terms": [
+      "liverpool",
+      "community",
+      "shield",
+      "manchester",
+      "city"
+    ]
+  },
+  {
+    "sample_id": "cs-00062",
+    "transcript": "xúc xích vealz cp là sản phẩm xúc xích cao cấp giúp người dùng tiết kiệm tối đa thời gian nấu nướng mà vẫn có món ăn nhanh thơm ngon bổ dưỡng cho bữa ăn của mọi gia đình",
+    "cs_terms": [
+      "vealz",
+      "cp"
+    ]
+  },
+  {
+    "sample_id": "cs-00063",
+    "transcript": "khả năng phòng ngự của hậu vệ sinh năm một nghìn chín trăm chín mươi tám tỉ lệ nghịch với bộ kỹ năng tấn công tuyệt vời của anh điều đáng nói khả năng tấn công của alexander arnold cũng sa sút và chẳng có hiệu quả như trước",
+    "cs_terms": [
+      "alexander",
+      "arnold"
+    ]
+  },
+  {
+    "sample_id": "cs-00064",
+    "transcript": "trong chín ngàn cái trade đó anh mua bán được á bao nhiêu cái trade đó mà ngay cái ngay cái cái đáy rồi xong bán ngay cái đỉnh hay là ngược lại á bán ngay cái đáy rồi xong rồi mua lại ngay cái đỉnh",
+    "cs_terms": [
+      "trade",
+      "trade"
+    ]
+  },
+  {
+    "sample_id": "cs-00065",
+    "transcript": "và đặc biệt là khi bị covid thì à trước đây cái sự liên kết giữa đà nẵng a thừa thiên huế và và quảng nam á thì ờ",
+    "cs_terms": [
+      "covid"
+    ]
+  },
+  {
+    "sample_id": "cs-00066",
+    "transcript": "thế nhưng mà tại sao ở trong siêu thị bán được năm mươi nghìn tại sao ở cửa hàng thực phẩm sạch bán được một trăm nghìn và bắt đầu đi tìm hiểu những cái cách người ta pr cái cách người ta làm à làm",
+    "cs_terms": [
+      "pr"
+    ]
+  },
+  {
+    "sample_id": "cs-00067",
+    "transcript": "xong mình đầu tư thêm xong mình làm lời thêm tụi em đừng có gấp ok đừng có gấp mình làm á mình đi cái hướng đi á đầu tư á là nó cho nó chắc chắn nhưng ít rủi ro nhất không có cái gì á",
+    "cs_terms": [
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00068",
+    "transcript": "trong khi đó chiến lược gia người scotland có tới hai mươi bảy lần được vinh danh là huấn luyện viên xuất sắc nhất tháng và đang là kỷ lục của giải đấu",
+    "cs_terms": [
+      "scotland"
+    ]
+  },
+  {
+    "sample_id": "cs-00069",
+    "transcript": "ok sau khi mà lên tới đây và chụp hình một chút xíu á thì hồi nãy có mây rất là nhiều cho nên là tụi mình cũng ghé vô những cái quầy ki ốt đồ ăn ở đây để mua ăn thử",
+    "cs_terms": [
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00070",
+    "transcript": "liveshow dòng sông đa tình quy tụ đội ngũ sản xuất hùng hậu như đạo diễn phạm hoàng giang chỉ đạo nghệ thuật nghệ sĩ nhân dân quang vinh giám đốc sản xuất nữ ca sĩ ngọc trâm ca sĩ khách mời quang linh lê minh ngọc",
+    "cs_terms": [
+      "liveshow"
+    ]
+  },
+  {
+    "sample_id": "cs-00072",
+    "transcript": "sau đó chiếc bút đặc biệt có trang bị camera hồng ngoại sẽ làm nhiệm vụ đọc và chuyển chữ viết tay vào điện thoại thông qua ứng dụng thậm chí còn có thể chuyển thành dạng âm thanh nữa cơ các bạn ơi quá là vip pro luôn đúng không các bạn",
+    "cs_terms": [
+      "camera",
+      "vip",
+      "pro"
+    ]
+  },
+  {
+    "sample_id": "cs-00073",
+    "transcript": "ờ ừm cẩn thận khi sử dụng keo compa này thước và kéo ha rồi ờ các nhóm các con chú ý nà",
+    "cs_terms": [
+      "compa"
+    ]
+  },
+  {
+    "sample_id": "cs-00074",
+    "transcript": "đó chỉ cần nhét một cái cấu hình tốt vào camera đẹp hay không cũng không quá quan trọng bởi vì những con đó thì bán phân khúc giá loanh quanh tám triệu đồng đổ về",
+    "cs_terms": [
+      "camera"
+    ]
+  },
+  {
+    "sample_id": "cs-00076",
+    "transcript": "phải cẩn trọng hơn khi mà được tuyên bố như vậy với một ông chủ kinh doanh một cái doanh nghiệp vừa mới công bố ra là ờ tôi đang có một cái dự án mới và đây sẽ là metaverse mà bạn là người tiêu dùng bạn sẽ được hưởng lợi",
+    "cs_terms": [
+      "metaverse"
+    ]
+  },
+  {
+    "sample_id": "cs-00077",
+    "transcript": "số tiền này được đồng ý giải ngân trong bối cảnh người dân afghanistan đang bên bờ vực cuộc khủng hoảng nhân đạo tồi tệ nhất thế giới tại nước này thì có khoảng hai mươi hai triệu người tương đương hơn năm mươi lăm năm mươi phần trăm dân số có nguy cơ bị thiếu lương thực nghiêm trọng",
+    "cs_terms": [
+      "afghanistan"
+    ]
+  },
+  {
+    "sample_id": "cs-00078",
+    "transcript": "danh mục đầu tư của quỹ rất đa dạng trong đó khoảng đầu tư lớn nhất của quỹ là vào các công ty công nghệ chẳng hạn như apple microsoft alphabet",
+    "cs_terms": [
+      "apple",
+      "microsoft",
+      "alphabet"
+    ]
+  },
+  {
+    "sample_id": "cs-00079",
+    "transcript": "phong cách đá phạt của lionel messi chẳng có gì đặc biệt nhưng cú đá phạt bằng lòng trong đưa bóng đi xoáy vẫn xuất hiện thường xuyên trên sân cỏ",
+    "cs_terms": [
+      "lionel",
+      "messi"
+    ]
+  },
+  {
+    "sample_id": "cs-00080",
+    "transcript": "em thắc mắc một chút về ờ khi mà một cái mô hình kinh doanh mà ứng dụng thêm công nghệ blockchain",
+    "cs_terms": [
+      "blockchain"
+    ]
+  },
+  {
+    "sample_id": "cs-00081",
+    "transcript": "ở sài gòn này à bán nhà á không có lâu không có lẹ đâu đạig ia đình lâu lắm á có những căn vài năm",
+    "cs_terms": [
+      "đạig"
+    ]
+  },
+  {
+    "sample_id": "cs-00082",
+    "transcript": "thì với a dragon capital thì em biết là công ty cũng đã hoạt động ở việt nam rất là lâu rồi nên là kinh nghiệm ờ ờ đầy mình ở thị trường việt nam rồi nhưng mà nếu là gọi là có những cái điểm gì mà mình cho là mình có sự khác biệt so với các quỹ khác thì có thể là gì",
+    "cs_terms": [
+      "dragon",
+      "capital"
+    ]
+  },
+  {
+    "sample_id": "cs-00083",
+    "transcript": "quên cái tay che cái camera rồi hai bên có bán mắm nữa kìa",
+    "cs_terms": [
+      "camera"
+    ]
+  },
+  {
+    "sample_id": "cs-00084",
+    "transcript": "và ngoài ra nữa thì trên con chip đó thì nó có hệ thống anten rfid để có thể truy xuất nguồn gốc đi khi đi qua các cái cơ sở xuất nhập cũng như thuê sang chiết",
+    "cs_terms": [
+      "chip",
+      "anten",
+      "rfid"
+    ]
+  },
+  {
+    "sample_id": "cs-00085",
+    "transcript": "như vậy là chúng ta ừm nếu như mà tính về cái lượng dự trữ đồng euro à tại thị trường việt nam ngay cả những cái kênh mà chúng ta nói là thị trường chợ đen",
+    "cs_terms": [
+      "euro"
+    ]
+  },
+  {
+    "sample_id": "cs-00086",
+    "transcript": "thì giờ nếu mà lô đất nó bự quá nó lên tới vài chục tỷ đi nhưng mà mà nếu giờ bốn năm anh em gom lại mua lô mấy hecta",
+    "cs_terms": [
+      "hecta"
+    ]
+  },
+  {
+    "sample_id": "cs-00087",
+    "transcript": "có được cách biệt hai bàn arsenal chủ động chơi chậm và rút dần trụ cột ra nghỉ ngay cả như vậy tottenham cũng không thể tìm được đường vào khung thành của đối thủ khi phải thi đấu thiếu người và đánh chấp nhận thua với tỉ số một ba",
+    "cs_terms": [
+      "arsenal",
+      "tottenham"
+    ]
+  },
+  {
+    "sample_id": "cs-00088",
+    "transcript": "cách làm tỏi ngâm rượu dùng ba trăm gram tỏi bóc vỏ và xắt lát mỏng ngâm trong sáu trăm gram rượu trắng khoảng bốn mươi độ sau hai tuần lấy rượu ra dùng",
+    "cs_terms": [
+      "gram",
+      "gram"
+    ]
+  },
+  {
+    "sample_id": "cs-00089",
+    "transcript": "dưới thời của andrew và chi lu đội ngũ ai của baidu đã tăng lên một ngàn ba trăm nhân sự vào hai không mười bảy và dự kiến vẫn sẽ gia tăng",
+    "cs_terms": [
+      "andrew",
+      "baidu"
+    ]
+  },
+  {
+    "sample_id": "cs-00090",
+    "transcript": "hơn nữa xét về thế trận trên sân man united đã chơi ổn họ tạo ra cực nhiều cơ hội",
+    "cs_terms": [
+      "united"
+    ]
+  },
+  {
+    "sample_id": "cs-00091",
+    "transcript": "hệ thống thuyết minh tự động mười hai ngôn ngữ hệ thống quy a code của bốn mươi hạng mục được triển khai đáp ứng nhu cầu của khách tham quan",
+    "cs_terms": [
+      "code"
+    ]
+  },
+  {
+    "sample_id": "cs-00092",
+    "transcript": "và ngoài ra nữa thì trên con chip đó thì nó có hệ thống anten rfid để có thể truy xuất nguồn gốc đi khi khi khi đi qua các cái cơ sở ơ xuất nhập cũng như s sang chiết",
+    "cs_terms": [
+      "chip",
+      "anten",
+      "rfid"
+    ]
+  },
+  {
+    "sample_id": "cs-00093",
+    "transcript": "hai bàn thắng bằng chân trái một bàn thắng bằng chân phải và hai bàn bằng đầu đó là sự toàn diện của một cây săn bàn hàng đầu khi có thể ghi điểm từ mọi cú sút mọi góc độ và mọi vị trí bên cạnh việc ghi bàn jesus còn khá cừ trong khâu kiến tạo",
+    "cs_terms": [
+      "jesus"
+    ]
+  },
+  {
+    "sample_id": "cs-00094",
+    "transcript": "vâng anh và tất cả đều có thể thành hiện thực nhanh hơn nhờ công nghệ blockchain và đây là một công nghệ mà người việt nam đang ơ đang rất là nổi bật trên thế giới",
+    "cs_terms": [
+      "blockchain"
+    ]
+  },
+  {
+    "sample_id": "cs-00095",
+    "transcript": "thì bạn nên chờ mười bốn thực ra cũng chẳng cần phải chờ mười bốn pro max đâu mà kể cả bạn mua mười ba pro max bây giờ nó đã giải quyết được rồi đấy nhưng vấn đề ở đây là gì đấy là",
+    "cs_terms": [
+      "pro",
+      "max",
+      "pro",
+      "max"
+    ]
+  },
+  {
+    "sample_id": "cs-00096",
+    "transcript": "chúng tôi sẽ chờ đợi tổng thống đương nhiệm thay đổi lập trường của mình hoặc sự xuất hiện của tổng thống tương lai của ukraine người sẽ thay đổi lập trường về lợi ích của người dân ukraine",
+    "cs_terms": [
+      "ukraine",
+      "ukraine"
+    ]
+  },
+  {
+    "sample_id": "cs-00097",
+    "transcript": "tích cực góp phần phục vụ công cuộc xây dựng và phát triển tại lào đồng chí võ văn thưởng thăm hỏi động viên tinh thần cán bộ nhân viên công ty star telecom",
+    "cs_terms": [
+      "star",
+      "telecom"
+    ]
+  },
+  {
+    "sample_id": "cs-00098",
+    "transcript": "thời điểm này mỹ năm trong tay bảy mươi lăm phần trăm lượng vàng được trao đổi trên toàn thế giới và đồng usd là đồng tiền duy nhất còn được đảm bảo trực tiếp bởi vàng",
+    "cs_terms": [
+      "usd"
+    ]
+  },
+  {
+    "sample_id": "cs-00100",
+    "transcript": "thì mình mới nghĩ là game nó dễ quá nghĩ là tính ra là bất động sản thì mình cứ cứ nghe ta ta sao mình vậy là mình sẽ ăn thôi",
+    "cs_terms": [
+      "game"
+    ]
+  },
+  {
+    "sample_id": "cs-00101",
+    "transcript": "danh hiệu xuất sắc nhất trận đấu gặp tottenham là phần thưởng xứng đáng sau chín mươi phút xuất sắc nhất từ đầu mùa anh thắng một trăm phần trăm các pha không chiến",
+    "cs_terms": [
+      "tottenham"
+    ]
+  },
+  {
+    "sample_id": "cs-00103",
+    "transcript": "hôm qua sở văn hóa thể thao và du lịch lâm đồng cho biết đã đề nghị ủy ban nhân dân tỉnh điều chỉnh một số nội dung của festival hoa đà lạt lần thứ chín năm hai nghìn không trăm hai mươi hai trong đó hủy bỏ chương trình đêm chung kết hoa hậu trái đất việt nam",
+    "cs_terms": [
+      "festival"
+    ]
+  },
+  {
+    "sample_id": "cs-00104",
+    "transcript": "chúng ta cùng quay trở lại với chương trình giờ vàng thể thao sea games đã kết thúc rồi và trong khi a mọi người đang say sưa với chiến thắng và những lễ mừng công thì đã có một vài sự kiện được đánh giá là lịch sử với thể thao trong nước diễn ra",
+    "cs_terms": [
+      "sea",
+      "games"
+    ]
+  },
+  {
+    "sample_id": "cs-00105",
+    "transcript": "quyết định này cho thấy fed đã trở nên lạc quan hơn về triển vọng kinh tế và khả năng fed tăng lãi suất trong năm tới đang tăng lên vì vậy mà điều này sẽ giúp đồng đô la mỹ có thêm giá trị và vô tình sẽ làm suy yếu đồng ringgit malaysia trong thời gian ngắn hạn",
+    "cs_terms": [
+      "fed",
+      "fed",
+      "ringgit",
+      "malaysia"
+    ]
+  },
+  {
+    "sample_id": "cs-00106",
+    "transcript": "điểm hấp dẫn của sản phẩm này là bạn có thể sử dụng margin đòn bẩy với tỷ lệ rất cao",
+    "cs_terms": [
+      "margin"
+    ]
+  },
+  {
+    "sample_id": "cs-00107",
+    "transcript": "còn lại mười tám triệu đến từ các hợp đồng quảng cáo với rất nhiều những thương hiệu lớn như là dior nike hay tiffany",
+    "cs_terms": [
+      "dior",
+      "nike",
+      "tiffany"
+    ]
+  },
+  {
+    "sample_id": "cs-00108",
+    "transcript": "đầu tư vào nhóm mid caps thì giúp nhà đầu tư kiếm được lợi nhuận cao hơn vn ba mươi và vì thế nên rủi ro cũng sẽ nhiều hơn",
+    "cs_terms": [
+      "mid",
+      "caps",
+      "vn"
+    ]
+  },
+  {
+    "sample_id": "cs-00109",
+    "transcript": "tương đương khoảng ba mươi phần trăm gdp toàn cầu và là thương mại tự do lớn nhất thế giới xét về quy mô dân số",
+    "cs_terms": [
+      "gdp"
+    ]
+  },
+  {
+    "sample_id": "cs-00110",
+    "transcript": "ước tính từ công ty nghiên cứu thị trường refinitis cho biết các nhà phân tích đã dự báo lợi nhuận trung bình của wells fargo trong quý trước là chín mươi bảy xu cho một cổ phiếu",
+    "cs_terms": [
+      "refinitis",
+      "wells",
+      "fargo"
+    ]
+  },
+  {
+    "sample_id": "cs-00111",
+    "transcript": "thì theo anh ở việt nam trong cái cuộc đua metaverse này nói một cách cụ thể thì lĩnh vực nào có thể đi đầu nhanh nhất",
+    "cs_terms": [
+      "metaverse"
+    ]
+  },
+  {
+    "sample_id": "cs-00112",
+    "transcript": "hai không tám không thì khi dùng cái bộ case pc đó thì dùng những cái tác vụ media như edits video photoshop các thứ nó rất là mượt nó mượt kinh khủng luôn",
+    "cs_terms": [
+      "case",
+      "pc",
+      "media",
+      "edits",
+      "video",
+      "photoshop"
+    ]
+  },
+  {
+    "sample_id": "cs-00113",
+    "transcript": "và chúng ta hoàn toàn yên tâm rằng không thể nào mà có một cái ơ metaverse như trong các phim của hollywood là phủ nhận cái cuộc sống đời thật",
+    "cs_terms": [
+      "metaverse",
+      "hollywood"
+    ]
+  },
+  {
+    "sample_id": "cs-00115",
+    "transcript": "hiện sản phẩm xúc xích vealz cp được bày bán phổ biến tại nhiều hệ thống siêu thị thu hút sự chú ý của người dùng",
+    "cs_terms": [
+      "vealz",
+      "cp"
+    ]
+  },
+  {
+    "sample_id": "cs-00116",
+    "transcript": "hãy lên youtube và search những video tổng hợp về các bàn thắng từ chấm đá phạt của messi sẽ cho ra cả đống kết quả",
+    "cs_terms": [
+      "youtube",
+      "search",
+      "video",
+      "messi"
+    ]
+  },
+  {
+    "sample_id": "cs-00118",
+    "transcript": "trước hết phải nói rằng bitcoin không bị kiểm soát bởi bất cứ tổ chức nào",
+    "cs_terms": [
+      "bitcoin"
+    ]
+  },
+  {
+    "sample_id": "cs-00119",
+    "transcript": "bàn về vấn đề này ngay từ năm một ngàn chín trăm chín mươi tư nhà kinh tế học người mỹ là paul m romer đã lên tiếng cảnh báo về sự thật của các thần kỳ kinh tế đông á",
+    "cs_terms": [
+      "paul",
+      "romer"
+    ]
+  },
+  {
+    "sample_id": "cs-00120",
+    "transcript": "malacia sau những trận thăng hoa đã lộ ra sự non nớt về tâm lý anh tấn công dở tệ và hầu như không có tình huống tạt bóng nào đáng chú ý vào vòng cấm",
+    "cs_terms": [
+      "malacia"
+    ]
+  },
+  {
+    "sample_id": "cs-00121",
+    "transcript": "có phàn nàn mỗi cái màn hình sáu phẩy một inch thì đối với nhiều anh em tay to thì thấy nó hơi nhỏ nhưng đối với phần lớn mọi người dùng thì đây lại là cái kích thước nó phù hợp rồi và cái chê nữa ấy chắc là chê mỗi cái vụ không có màn hình trăm hai mươi hz thôi thì cái đấy chúng ta phải chịu",
+    "cs_terms": [
+      "inch",
+      "hz"
+    ]
+  },
+  {
+    "sample_id": "cs-00122",
+    "transcript": "đây là galaxy z fold ba ờ dùng cái từ gì ta bình thường thì để nói về những cái điện thoại chắc là các bạn quen quá rồi nhưng mà tại sao z fold ba nó là cái sản phẩm khiến mình ưng ý ưng ý bởi vì mình có một cái màn hình rất là lớn trong một cái thân hình",
+    "cs_terms": [
+      "galaxy",
+      "fold",
+      "fold"
+    ]
+  },
+  {
+    "sample_id": "cs-00123",
+    "transcript": "thì hiện nay là lđồng bằng sông cửu long một năm á thì có thể sản xuất vào khoảng hai mươi sáu tới hai mươi bảy triệu tấn lúa",
+    "cs_terms": [
+      "lđồng"
+    ]
+  },
+  {
+    "sample_id": "cs-00124",
+    "transcript": "quan trọng hơn anh có cho mình bản năng sát thủ của một tiền đạo với cảm quan không gian và khả năng đánh hơi bàn thắng cực kỳ thính nhạy pep guardiola đã và đang khai thác tối đa yếu tố này để biến cậu học trò trở thành con quái vật sẵn sàng đe dọa mọi hàng thủ trên thế giới",
+    "cs_terms": [
+      "pep",
+      "guardiola"
+    ]
+  },
+  {
+    "sample_id": "cs-00125",
+    "transcript": "dưới chân núi là tu viện thánh catherine được xây dựng để làm nơi tưởng niệm nữ thánh tử đạo catherine",
+    "cs_terms": [
+      "catherine",
+      "catherine"
+    ]
+  },
+  {
+    "sample_id": "cs-00126",
+    "transcript": "nếu hậu vệ trái của mu là alex karet co vào để bịt lấy khoảng trống này tiền đạo phải của man city là riyad mahrez sẽ có thêm nhiều không gian để chơi bóng",
+    "cs_terms": [
+      "alex",
+      "karet",
+      "city",
+      "riyad",
+      "mahrez"
+    ]
+  },
+  {
+    "sample_id": "cs-00127",
+    "transcript": "một lời khen có cánh như làm nền cho một trong những cuộc so tài đáng chờ đợi nhất của vòng đấu thứ mười premier league mùa giải hai không hai hai hai không hai ba",
+    "cs_terms": [
+      "premier",
+      "league"
+    ]
+  },
+  {
+    "sample_id": "cs-00128",
+    "transcript": "hơn tám mươi phần trăm các đơn vị s tech tại việt nam đang tập trung vào mảng thị trường khối mười hai và ngoại ngữ trong mỗi mạng các sản phẩm đều có độ tương đồng cao chưa có sự khác biệt lớn giáo dục trực tuyến tại việt nam có triển vọng lớn với hơn hai mươi ba triệu sinh viên thu nhập trung lưu tăng",
+    "cs_terms": [
+      "tech"
+    ]
+  },
+  {
+    "sample_id": "cs-00129",
+    "transcript": "theo ông harish điều này không gây bất ngờ bởi tốc độ tăng trưởng và tình hình lạm phát hiện nay rõ ràng là không bền vững ông harish bày tỏ kỳ vọng nền kinh tế mỹ tăng trưởng ở mức trung bình trong những tháng tới",
+    "cs_terms": [
+      "harish",
+      "harish"
+    ]
+  },
+  {
+    "sample_id": "cs-00130",
+    "transcript": "và những phần nào và trong cái bài trình bày của anh a anh huy và thầy tuấn đã giải đáp rồi thì tôi phải đánh dấu lại để làm sao để có thể giải đáp được tối đa những cái câu hỏi mà các a các bạn khán giả đã gửi tới vào cái form của chương trình",
+    "cs_terms": [
+      "form"
+    ]
+  },
+  {
+    "sample_id": "cs-00131",
+    "transcript": "nói chung phải xác định là ví dụ các shop bán hàng thì cái cái chín bảy chín tám phần trăm mà là gọi là hàng cũ ấy à họ chỉ có tiếp một cái loại nữa là chín chín phần trăm là đúng là hàng like new hàng mới và tất nhiên là k hai mươi pro là con máy là flagship năm hai không mười chín thì bây giờ là nó cũng gần bốn năm rồi",
+    "cs_terms": [
+      "shop",
+      "like",
+      "new",
+      "pro",
+      "flagship"
+    ]
+  },
+  {
+    "sample_id": "cs-00132",
+    "transcript": "ôi mình cả thế giới như sụp đổ tôi thấy mình bị phản bội và muốn các fan khác cũng nhận ra bản chất của con người đó",
+    "cs_terms": [
+      "fan"
+    ]
+  },
+  {
+    "sample_id": "cs-00133",
+    "transcript": "thì á là trong cái video này anh muốn chia sẻ với các em á cái cách mà mình đầu tư vô trong cái tiền điện tử đó bông mà xong rồi cái lý do tại sao",
+    "cs_terms": [
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00134",
+    "transcript": "đến thế kỷ thứ mười bảy các ngân hàng tư nhân tại châu âu bắt đầu có ý tưởng phát hành các màu giấy thể hiện quyền chứng nhận sở hữu vàng dưới dạng ghi chú giấy các ghi chú này chính là bank note",
+    "cs_terms": [
+      "bank",
+      "note"
+    ]
+  },
+  {
+    "sample_id": "cs-00135",
+    "transcript": "chính tham vọng này đã đe dọa sự ổn định của hệ thống bretton woods tổng dự trữ vàng của mỹ giảm thấp so với giá trị đô la ngoại tệ",
+    "cs_terms": [
+      "bretton",
+      "woods"
+    ]
+  },
+  {
+    "sample_id": "cs-00136",
+    "transcript": "ở đây á thậm chí là có ba view mơ bên này bên kia với lại một cái view rất là đặc biệt đó là view nhìn thấy được tượng phật bà",
+    "cs_terms": [
+      "view",
+      "view",
+      "view"
+    ]
+  },
+  {
+    "sample_id": "cs-00137",
+    "transcript": "theo đó các khối bê tông hình kim tự tháp mỗi trụ cách nhau khoảng hai đến ba mét đã được đặt dưới mặt đất các khối này có nhiệm vụ ngăn cản đà tiến công của xe tăng và xe bọc thép ukraine nếu xung đột vượt ngoài tầm kiểm soát và lan sang lãnh thổ nga",
+    "cs_terms": [
+      "ukraine"
+    ]
+  },
+  {
+    "sample_id": "cs-00138",
+    "transcript": "về phía đội chủ nhà omonia hai bàn thua quá chóng vánh đã khiến họ quá bất ngờ và gần như không còn tinh thần thi đấu họ không thể chạm bóng và không có được bất cứ pha tấn công nào thực sự nguy hiểm",
+    "cs_terms": [
+      "omonia"
+    ]
+  },
+  {
+    "sample_id": "cs-00139",
+    "transcript": "do william paterson làm chủ sở hữu và ngân hàng này cũng đã trở thành ngân hàng trung ương đầu tiên trên thế giới",
+    "cs_terms": [
+      "william",
+      "paterson"
+    ]
+  },
+  {
+    "sample_id": "cs-00140",
+    "transcript": "tức là oxy phải đảm bảo là phải từ bốn chấm trở lên cho năm chấm mấy đến sáu chấm thì cái oxy như vậy nó sẽ đảm bảo con tôm nó sống tốt",
+    "cs_terms": [
+      "oxy",
+      "oxy"
+    ]
+  },
+  {
+    "sample_id": "cs-00141",
+    "transcript": "trên tivi báo đài tin tức hay các bài điểm tin của tôi các bạn hay nghe thấy những thứ đại loại như vn index ngày hôm nay đã giảm một trăm điểm",
+    "cs_terms": [
+      "tivi",
+      "vn",
+      "index"
+    ]
+  },
+  {
+    "sample_id": "cs-00142",
+    "transcript": "trong khi pep guardiola đang ở đỉnh cao danh vọng tại premier league cùng với một dàn hảo thủ gần cả tỷ bạc thì ở la liga barcelona của xavier hernández cũng không hề kém cạnh",
+    "cs_terms": [
+      "pep",
+      "guardiola",
+      "premier",
+      "league",
+      "liga",
+      "barcelona",
+      "xavier",
+      "hernández"
+    ]
+  },
+  {
+    "sample_id": "cs-00143",
+    "transcript": "xin mời cô bác hãy cùng tôi theo dõi trong video ngày hôm nay của sống khỏe mỗi ngày để biết chi tiết cô bác nhé",
+    "cs_terms": [
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00144",
+    "transcript": "lên tám phần trăm đến chín phần trăm và giảm mức omega ba sáu",
+    "cs_terms": [
+      "omega"
+    ]
+  },
+  {
+    "sample_id": "cs-00145",
+    "transcript": "công ty bà đã đi tiên phong trong việc đưa vào sử dụng chiếc ghế nghỉ trưa chuyên dụng gọi là energypod",
+    "cs_terms": [
+      "energypod"
+    ]
+  },
+  {
+    "sample_id": "cs-00146",
+    "transcript": "trung quốc hiện đứng đầu thế giới trong sản xuất smartphone chín mươi phần trăm số lượng ti vi thông minh sáu mươi bảy phần trăm và máy tính cá nhân sáu mươi lăm phần trăm",
+    "cs_terms": [
+      "smartphone"
+    ]
+  },
+  {
+    "sample_id": "cs-00147",
+    "transcript": "thoạt đầu nhiều người lo ngại hệ thống bretton woods sụp đổ sẽ kết liễu thời kỳ tăng trưởng nhanh nhưng trên thực tế quá trình chuyển tiếp sang tỷ giá thả nổi đã diễn ra khá suôn sẻ và đúng lúc tỷ giá linh hoạt giúp các nền kinh tế dễ điều chỉnh hơn trước những cú sốc bên ngoài",
+    "cs_terms": [
+      "bretton",
+      "woods"
+    ]
+  },
+  {
+    "sample_id": "cs-00148",
+    "transcript": "ờ cách thức hoạt động của chúng thì ờ chúng không có gọi là ừm gọi là lôi kéo một cách nó cuồng nhiệt họ chỉ ép mình vào trong cái nhóm zalo đó thôi và nó xem cái cách mà họ giảng dạy hàng ngày và chia sẻ các cơ hội đầu tư và kiến thức",
+    "cs_terms": [
+      "zalo"
+    ]
+  },
+  {
+    "sample_id": "cs-00149",
+    "transcript": "các nghiên cứu về việc làm trong tương lai của phòng thí nghiệm về trí tuệ nhân tạo mitibm watson ai lab này cho thấy ai sẽ giúp con người tiết kiệm thời gian hơn rất nhiều trong công việc",
+    "cs_terms": [
+      "mitibm",
+      "watson",
+      "lab"
+    ]
+  },
+  {
+    "sample_id": "cs-00150",
+    "transcript": "cùng với đó ba nghìn tỷ won được tạo ra sau đại dịch covid mười chín trong đó một phẩy tư nghìn tỷ won đã được bơm vào để ổn định thị trường nhằm giải tỏa lo ngại ngày càng tăng về trái phiếu doanh nghiệp và thị trường tiền tệ ngắn hạn",
+    "cs_terms": [
+      "won",
+      "covid",
+      "won"
+    ]
+  },
+  {
+    "sample_id": "cs-00151",
+    "transcript": "thật ra á là chúng ta gọi là những cái tấm solar panel á là như hồi nãy anh huy đã dùng từ là tấm quang năng phải chính xác hơn là dùng là pin mặt trời",
+    "cs_terms": [
+      "solar",
+      "panel"
+    ]
+  },
+  {
+    "sample_id": "cs-00152",
+    "transcript": "mà tiền thiệt á của anh á mà anh bỏ ra đó bông anh đã làm gần chín ngàn cái trade trong cuộc đời của anh rồi",
+    "cs_terms": [
+      "trade"
+    ]
+  },
+  {
+    "sample_id": "cs-00153",
+    "transcript": "hoặc là đến hang rái check in bãi san hô cổ khổng lồ nhất tại việt nam rồi tạt ngang qua vườn nho thái an nhấm nháp ngụm rượu",
+    "cs_terms": [
+      "check"
+    ]
+  },
+  {
+    "sample_id": "cs-00154",
+    "transcript": "tôi đem một cái con ờ butter ở trong cái thế giới của tôi nhưng mà vì b làm blockchain cho nên tôi có thể giao tiếp được với tất cả các nơi",
+    "cs_terms": [
+      "butter",
+      "blockchain"
+    ]
+  },
+  {
+    "sample_id": "cs-00155",
+    "transcript": "nhận thấy vỏ trứng vịt giàu canxi và chứa lượng lớn magiê kali sắt phốt pho những chất này tốt cho sự sinh trưởng thực vật kích thích rễ phát triển nên có thể tái sử dụng để làm phân bón",
+    "cs_terms": [
+      "canxi",
+      "magiê",
+      "kali"
+    ]
+  },
+  {
+    "sample_id": "cs-00156",
+    "transcript": "ở vòng đấu trước đó hậu vệ số sáu sáu chơi cực tệ trong trận hòa ba đều với brighton ba mắc lỗi trong cả ba tình huống mà lữ đoàn đỏ phải nhận bàn thua",
+    "cs_terms": [
+      "brighton"
+    ]
+  },
+  {
+    "sample_id": "cs-00157",
+    "transcript": "nhưng mà con này thì cưng hơn mà chưa kể chúng ta có cái màu xanh mint thực sự là quá đẹp luôn đến bây giờ mình vẫn vô cùng thích cái màu xanh mint trên con iphone mười hai serise",
+    "cs_terms": [
+      "mint",
+      "mint",
+      "iphone",
+      "serise"
+    ]
+  },
+  {
+    "sample_id": "cs-00158",
+    "transcript": "cà rốt thì mình có nhiều vitamin a lắm nên mấy bạn ăn mình thì mấy bạn sẽ có một đôi mắt thiệt sáng như là ngôi sao luôn",
+    "cs_terms": [
+      "vitamin"
+    ]
+  },
+  {
+    "sample_id": "cs-00159",
+    "transcript": "nếu là một người mê đọc sách nhưng bận rộn bạn có thể tải ứng dụng sách tinh gọn do nnt studio sản xuất ứng dụng cung cấp phiên bản tinh gọn của hàng nghìn quyển sách với mỗi quyển sách",
+    "cs_terms": [
+      "nnt",
+      "studio"
+    ]
+  },
+  {
+    "sample_id": "cs-00160",
+    "transcript": "và là một cái từ khóa thời thượng thôi để mà làm pr làm marketing câu khách thôi chứ thực sự không phải không thực sự đang làm về metaverse thì có cách nào để nhìn",
+    "cs_terms": [
+      "pr",
+      "marketing",
+      "metaverse"
+    ]
+  },
+  {
+    "sample_id": "cs-00161",
+    "transcript": "vâng và thực tế thì hiện nay pháp luật việt nam không cấp phép hoạt động cho bất kỳ một sàn thương mại bất kỳ một sàn forex nào ờ chính bởi vì thế tất cả các giao dịch ngoại hối của cá nhân với các sản nước ngoài sẽ không được thừa nhận và bảo vệ",
+    "cs_terms": [
+      "forex"
+    ]
+  },
+  {
+    "sample_id": "cs-00162",
+    "transcript": "đây là khu đất biền trệt ven sông vàm cỏ tây thuộc thành phố tân an tỉnh long an được nghiên cứu đầu tư thí điểm mô hình kinh tế vac quy mô lớn",
+    "cs_terms": [
+      "vac"
+    ]
+  },
+  {
+    "sample_id": "cs-00163",
+    "transcript": "mật ong là thực phẩm giàu dinh dưỡng có vị ngọt tính bình không nóng thành phần chủ yếu của mật ong là đường gluco levulose và fructose",
+    "cs_terms": [
+      "gluco",
+      "levulose",
+      "fructose"
+    ]
+  },
+  {
+    "sample_id": "cs-00164",
+    "transcript": "nhà khảo cổ học người anh leonard woolley đã tìm thấy một cổ vật được gọi là cờ hiệu hoàng gia ur có niên đại vào thiên niên kỷ thứ ba trước công nguyên",
+    "cs_terms": [
+      "leonard",
+      "woolley",
+      "ur"
+    ]
+  },
+  {
+    "sample_id": "cs-00165",
+    "transcript": "chào mừng các bạn quay trở lại với the quoc khanh show ngày hôm nay thì chúng ta sẽ cùng tìm hiểu về chủ đề đầu tư gì với hai trăm triệu đồng",
+    "cs_terms": [
+      "quoc",
+      "show"
+    ]
+  },
+  {
+    "sample_id": "cs-00166",
+    "transcript": "dạ thưa cô là đèn học c có tên là đèn học bóng led bảng",
+    "cs_terms": [
+      "led"
+    ]
+  },
+  {
+    "sample_id": "cs-00167",
+    "transcript": "rạng sáng hôm nay manchester united đã trải qua lượt trận thứ ba khuôn khổ vòng bảng europa league",
+    "cs_terms": [
+      "manchester",
+      "united",
+      "europa",
+      "league"
+    ]
+  },
+  {
+    "sample_id": "cs-00168",
+    "transcript": "thì ngay giữa rất là khó tại vì bất cứ bạn cái gì bạn bán á là ngay giữa rất là khó bạn phải cao cấp hay là mass chứ đừng có ngay giữa",
+    "cs_terms": [
+      "mass"
+    ]
+  },
+  {
+    "sample_id": "cs-00169",
+    "transcript": "dạ thưa cô đèn học của nhóm con là đèn học led tròn hoặc bóng sợi đốt",
+    "cs_terms": [
+      "led"
+    ]
+  },
+  {
+    "sample_id": "cs-00170",
+    "transcript": "tiêu dùng sẽ là tốt nhất đầu tư tích lũy cũng là sẽ là tốt nhất cho nên là support ngược lại thị trường bởi vì các quỹ thì cuối cùng cũng đầu tư vào thị trường chứng khoán",
+    "cs_terms": [
+      "support"
+    ]
+  },
+  {
+    "sample_id": "cs-00171",
+    "transcript": "để tạo lòng tin với các nhà đầu tư những người môi giới của sàn liber forex đã trình ra một giấy phép mà họ cho là từ ủy ban dịch vụ tài chính quốc tế belize ifsc",
+    "cs_terms": [
+      "liber",
+      "forex",
+      "belize",
+      "ifsc"
+    ]
+  },
+  {
+    "sample_id": "cs-00172",
+    "transcript": "tại cop hai mươi sáu ở glasgow vua charles khi đó là thái tử anh đã có bài phát biểu quan trọng trong buổi lễ khai mạc sự kiện theo kế hoạch cop hai mươi bảy sẽ diễn ra từ ngày sáu đến ngày mười tám tháng mười một ở sharm el sheikh ai cập",
+    "cs_terms": [
+      "cop",
+      "glasgow",
+      "charles",
+      "cop",
+      "sharm",
+      "el",
+      "sheikh"
+    ]
+  },
+  {
+    "sample_id": "cs-00173",
+    "transcript": "ngoài ra thì ờ trung tâm vncert cũng sẽ đẩy mạnh cái công tác là triển khai thêm các cái khung các cái ơ công cụ hoặc là các cái tính năng hỗ trợ người dân trong cái",
+    "cs_terms": [
+      "vncert"
+    ]
+  },
+  {
+    "sample_id": "cs-00174",
+    "transcript": "để đẩy mạnh thương hiệu chè shan tuyết người dân tại xã hồng thái đã đứng lên thành lập hợp tác xã đầu tư công nghệ chế biến hiện đại",
+    "cs_terms": [
+      "shan"
+    ]
+  },
+  {
+    "sample_id": "cs-00175",
+    "transcript": "đặc biệt xúc xích vealz được xông khói bằng gỗ sồi tự nhiên với công nghệ hiện đại mang đến hương vị rất đặc trưng",
+    "cs_terms": [
+      "vealz"
+    ]
+  },
+  {
+    "sample_id": "cs-00176",
+    "transcript": "nghênh đón gã hàng xóm nhìn đã thấy ngứa mắt huấn luyện viên mikel arteta rất may mắn khi sở hữu đội hình tối ưu nhất ngay cả thanh niên to khỏe nhưng mỏng manh dễ vỡ như thomas partey cũng đã bình phục chấn thường thế nên pháo thủ đã chuẩn bị sẵn trận địa nghênh chiến kình địch",
+    "cs_terms": [
+      "mikel",
+      "arteta",
+      "thomas",
+      "partey"
+    ]
+  },
+  {
+    "sample_id": "cs-00177",
+    "transcript": "phía moscow không cung cấp thêm thông tin chi tiết về kết quả hoặc bất cứ nội dung cụ thể nào trong các cuộc điện đàm giữa bộ trưởng shoigu với người đồng cấp mỹ lioyd austin",
+    "cs_terms": [
+      "moscow",
+      "shoigu",
+      "lioyd",
+      "austin"
+    ]
+  },
+  {
+    "sample_id": "cs-00178",
+    "transcript": "thế nên alibaba đã rục rịch chuẩn bị một số lượng lớn lều và túi ngủ cho nhân viên trong khu vực chuyên dụng hoặc là hành lang",
+    "cs_terms": [
+      "alibaba"
+    ]
+  },
+  {
+    "sample_id": "cs-00179",
+    "transcript": "nếu mà có thể chốt lại một câu ngắn gọn về metaverse mà để anh chia sẻ với các chủ doanh nghiệp đang đang thắc mắc về chuyện này hoặc là đang mong muốn tiếp cận lĩnh vực này",
+    "cs_terms": [
+      "metaverse"
+    ]
+  },
+  {
+    "sample_id": "cs-00180",
+    "transcript": "liverpool vẫn kiên định tổ chức lễ diễu hành với hai chiếc cup mà họ giành được trong mùa giải năm nay và không khí vẫn tưng bừng dù có ít nụ cười hơn một chút",
+    "cs_terms": [
+      "liverpool",
+      "cup"
+    ]
+  },
+  {
+    "sample_id": "cs-00181",
+    "transcript": "cụ thể theo nghiên cứu được công bố trên jinshan journal of medicinal chemistry",
+    "cs_terms": [
+      "jinshan",
+      "journal",
+      "of",
+      "medicinal",
+      "chemistry"
+    ]
+  },
+  {
+    "sample_id": "cs-00182",
+    "transcript": "màu tím đậm là trên hai ngàn milimet trên năm được chưa",
+    "cs_terms": [
+      "milimet"
+    ]
+  },
+  {
+    "sample_id": "cs-00183",
+    "transcript": "chia sẻ rõ hơn thì chuối có chứa hai loại chất xơ chính bao gồm pectin có xu hướng giảm khi chuối chín và kháng tinh bột được tìm thấy trong chuối chưa chín cô bác nhé",
+    "cs_terms": [
+      "pectin"
+    ]
+  },
+  {
+    "sample_id": "cs-00184",
+    "transcript": "cũng đã được đầu tư hàng triệu đô la mỹ để tham gia vào cuộc chạy đua thu hút người dùng tuy vậy thị trường s tech ở việt nam còn khá mới mẻ và non trẻ",
+    "cs_terms": [
+      "tech"
+    ]
+  },
+  {
+    "sample_id": "cs-00185",
+    "transcript": "tổ chức xếp hạng tín dụng fitch ratings đã giảm dự báo tăng trưởng kinh tế hai nghìn không trăm hai hai của trung quốc từ bốn phẩy tám phần trăm xuống bốn phẩy ba phần trăm",
+    "cs_terms": [
+      "fitch",
+      "ratings"
+    ]
+  },
+  {
+    "sample_id": "cs-00186",
+    "transcript": "theo ông blinken mỹ đã sẵn sàng cho mọi tình huống và sẽ đáp trả cùng với sự phối hợp của các đối tác và đồng minh đặc biệt là hàn quốc và nhật bản",
+    "cs_terms": [
+      "blinken"
+    ]
+  },
+  {
+    "sample_id": "cs-00187",
+    "transcript": "giữa khu vực này là một hồ nước trong veo được thiết kế như dòng sông venice",
+    "cs_terms": [
+      "venice"
+    ]
+  },
+  {
+    "sample_id": "cs-00188",
+    "transcript": "nâng cao hiệu quả trong nghiên cứu triển khai các hoạt động đổi mới sáng tạo kết nối đô thị thông minh tại thành phố thủ đức bao gồm các khóa đào tạo tập huấn kỹ thuật về chuyển đổi giải pháp unk sai giải pháp e water giải pháp e water engineering",
+    "cs_terms": [
+      "unk",
+      "water",
+      "water",
+      "engineering"
+    ]
+  },
+  {
+    "sample_id": "cs-00189",
+    "transcript": "nhưng mà bây giờ trang trại quang linh farm mà trồng được à như thế này là quá là ok rồi",
+    "cs_terms": [
+      "farm",
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00190",
+    "transcript": "tại đây hệ thống quạt đối lưu đẩy không khí nóng lên cao thoát ra ngoài qua mái thông gió một bên số lượng lắp quạt trên diện tích một nghìn mét vuông là sáu đến tám quạt với loại quạt có công suất bốn trăm năm mươi watt",
+    "cs_terms": [
+      "watt"
+    ]
+  },
+  {
+    "sample_id": "cs-00191",
+    "transcript": "cánh tay của blackrock còn vươn dài đến trái phiếu doanh nghiệp nợ quốc gia hàng hóa các quỹ phòng hộ",
+    "cs_terms": [
+      "blackrock"
+    ]
+  },
+  {
+    "sample_id": "cs-00192",
+    "transcript": "năm một ngàn chín trăm ba mươi sáu paris là cái tên tiếp theo từ bỏ bản vị vàng trong khi luân đôn phá giá bảng anh thêm một lần nữa để giành lại lợi thế từ nước mỹ",
+    "cs_terms": [
+      "paris"
+    ]
+  },
+  {
+    "sample_id": "cs-00193",
+    "transcript": "một con máy đắt tiền như này mà cái phần bao da này mình mua có ba trăm rưỡi nhìn vẫn rất là ok cầm nắm trên tay vẫn ổn đó vậy thì các bạn thấy sao nói chung thì máy ảnh nó là một cái món đồ mà không thể nào thiếu được đối với kiểu dân làm creator làm về hình ảnh",
+    "cs_terms": [
+      "ok",
+      "creator"
+    ]
+  },
+  {
+    "sample_id": "cs-00194",
+    "transcript": "cũng do những tác động kinh tế mà biến thể omicron gây ra các nhà kinh tế cho biết ngân hàng trung ương anh boi có thể giữ nguyên mức lãi suất thấp kỷ lục hiện nay",
+    "cs_terms": [
+      "omicron"
+    ]
+  },
+  {
+    "sample_id": "cs-00195",
+    "transcript": "và link mua hàng thì tất nhiên là mình cũng sẽ để phía dưới mô tả video nha các bạn quan tâm thì cứ bấm vào à các bạn sẽ có những cái mã đồ này kia nhớ áp vào ha",
+    "cs_terms": [
+      "link",
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00196",
+    "transcript": "chúng tôi đã xây dựng được một cái nền tảng logistics khá là vững mạnh à có thể tự phục vụ một trăm phần trăm cái hàng hóa của trên sàn thương mại điện tử của lazada",
+    "cs_terms": [
+      "logistics",
+      "lazada"
+    ]
+  },
+  {
+    "sample_id": "cs-00197",
+    "transcript": "cái cái cái nhiệt độ lạnh à thì cái cục lạnh đó thường là nó ảnh hưởng tới môi trường rất là nhiều vì nó ảnh hưởng tới tầng ozone",
+    "cs_terms": [
+      "ozone"
+    ]
+  },
+  {
+    "sample_id": "cs-00198",
+    "transcript": "để cho dân bản à trồng với gì đấy hành này như này là thu hoạch được rồi này đấy ok chưa quá tuyệt vời luôn nhờ",
+    "cs_terms": [
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00199",
+    "transcript": "mình mình suy nghĩ cái gì mà nó sẽ làm cho mình lời đó thì á cái đầu mình á nó sẽ nó nó chỉ tím tìm kiếm cái chứng minh đó thôi à cái dấu hiệu á mà chứng minh là mình đúng ok bởi nó rất là nguy hiểm đó bông",
+    "cs_terms": [
+      "ok"
+    ]
+  },
+  {
+    "sample_id": "cs-00200",
+    "transcript": "kết quả test nhanh cho của phọc môn và hàn the đối với chả á là kết quả bún và mì và bánh a bánh bánh a bánh ướt á cũng đạt kết quả về phọc môn và hàn the",
+    "cs_terms": [
+      "test"
+    ]
+  },
+  {
+    "sample_id": "cs-00201",
+    "transcript": "nhưng sự thật là có một công ty có tầm ảnh hưởng lớn hơn bất cứ công ty nào kể trên đó là blackrock hay tảng đá đen",
+    "cs_terms": [
+      "blackrock"
+    ]
+  },
+  {
+    "sample_id": "cs-00202",
+    "transcript": "indonesia cần phải sớm tìm ra cách chấm dứt bạo lực hướng đến nền bóng đá đẹp thân thiện bởi đây là thời điểm các nước đông nam á bao gồm cả indonesia đang hướng đến kế hoạch cùng đăng cai world cup hai nghìn không trăm ba tư",
+    "cs_terms": [
+      "indonesia",
+      "indonesia",
+      "world",
+      "cup"
+    ]
+  },
+  {
+    "sample_id": "cs-00203",
+    "transcript": "đã ký lệnh hoãn trả nợ chiến phí sau năm một ngàn chín trăm ba mươi ba với sự trỗi dậy của adolf hitler đức từ từ đi theo lối riêng và rút khỏi giao dịch thương mại thế giới trở thành nền kinh tế tự cấp tự túc mặc dù vẫn duy trì liên hệ với áo và đông âu",
+    "cs_terms": [
+      "adolf",
+      "hitler"
+    ]
+  },
+  {
+    "sample_id": "cs-00204",
+    "transcript": "bây giờ mình chọn loại nào đây bắp cải xúc xích hành tây sốt mayonaise",
+    "cs_terms": [
+      "mayonaise"
+    ]
+  },
+  {
+    "sample_id": "cs-00205",
+    "transcript": "đã từng có thời điểm lionel messi sút phạt tốt tới mức các đồng đội thậm chí chuẩn bị ăn mừng ngay từ khi trọng tài cho đội nhà được hưởng quả đá phạt",
+    "cs_terms": [
+      "lionel",
+      "messi"
+    ]
+  },
+  {
+    "sample_id": "cs-00206",
+    "transcript": "rất tuyệt vời trên cái con bàn phím này đó thực ra đây là mình chỉ show có một cái thôi chứ thực ra mình còn ờ vài con nữa cơ anh em yên tâm rồi và sản phẩm cuối cùng đây",
+    "cs_terms": [
+      "show"
+    ]
+  },
+  {
+    "sample_id": "cs-00207",
+    "transcript": "thì người ta sẽ mua fold bốn ấy thực sự đến galaxy z fold bốn đấy bởi vì sao bởi vì là tự nhiên bây giờ thì mình dùng một cái điện thoại màn hình gập kể cả nó có đẹp đến mấy chăng nữa bảo là điện thoại mày điện thoại tàu à ôi dồi ôi cảm giác đấy nó cũng hơi buồn đúng không nào đấy",
+    "cs_terms": [
+      "fold",
+      "galaxy",
+      "fold"
+    ]
+  },
+  {
+    "sample_id": "cs-00208",
+    "transcript": "đạo hindu không ăn thịt bò vì bò là loài vật họ thờ cúng",
+    "cs_terms": [
+      "hindu"
+    ]
+  },
+  {
+    "sample_id": "cs-00209",
+    "transcript": "cái metaverse cái blockchain đó là gì internet hai chấm không",
+    "cs_terms": [
+      "metaverse",
+      "blockchain",
+      "internet"
+    ]
+  },
+  {
+    "sample_id": "cs-00210",
+    "transcript": "wu dao một chấm không được giới thiệu chính thức hồi tháng ba và đã khởi xướng các dự án nghiên cứu quy mô lớn ở các lĩnh vực khác nhau thông qua bốn mô hình wu dao wen yuan wu dao wen lan wu dao wen hui và wu dao wen su",
+    "cs_terms": [
+      "wu",
+      "wu",
+      "wen",
+      "yuan",
+      "wu",
+      "wen",
+      "wu",
+      "wen",
+      "wu",
+      "wen"
+    ]
+  },
+  {
+    "sample_id": "cs-00211",
+    "transcript": "hiện nay ứng dụng stockx vẫn đang hoạt động khá rầm rộ thu hút hàng trăm người mời trên a mỗi nhóm ứng dụng chẳng hạn như là zalo hay là telegram khác nhau",
+    "cs_terms": [
+      "stockx",
+      "zalo",
+      "telegram"
+    ]
+  },
+  {
+    "sample_id": "cs-00212",
+    "transcript": "cái nơi mà quản lý cái tài sản của bạn thì theo mình á thì nên làừ à lựa chọn theo cái tiêu chí là thứ nhất á là phải có cái lịch sử lâu đời",
+    "cs_terms": [
+      "làừ"
+    ]
+  },
+  {
+    "sample_id": "cs-00213",
+    "transcript": "tháng mười năm hai ngàn không trăm mười với sự tác động của strauss kahn các bộ trưởng tài chính nhóm g hai mươi đã đồng ý chuyển giao sáu phần trăm phiếu có quyền biểu quyết cho nhóm nước đang lên",
+    "cs_terms": [
+      "strauss",
+      "kahn"
+    ]
+  },
+  {
+    "sample_id": "cs-00214",
+    "transcript": "theo nhận định của anh phân tích của anh thì cái kịch bản nào sẽ dành cho đồng euro trong cái thời gian sắp tới và như vậy thì à các nhà đầu tư cũng như là người dân của chúng ta sẽ dựa trên một cái cơ sở như thế nào",
+    "cs_terms": [
+      "euro"
+    ]
+  },
+  {
+    "sample_id": "cs-00216",
+    "transcript": "số người thiệt mạng do bão haiyan ở bang florida đã tăng lên một trăm linh một người nhiều thành phố nằm trên đường đi của cơn bão cũng bị tàn phá nghiêm trọng",
+    "cs_terms": [
+      "haiyan",
+      "florida"
+    ]
+  },
+  {
+    "sample_id": "cs-00217",
+    "transcript": "các sản phẩm s tech hiện tại chỉ mới đáp ứng được phần nhỏ nhu cầu của khách hàng mặc dù có tiềm năng phát triển rất lớn và các loại hình sản phẩm khá đa dạng",
+    "cs_terms": [
+      "tech"
+    ]
+  },
+  {
+    "sample_id": "cs-00218",
+    "transcript": "và nhìn cái cách mà darwin nunez ăn mừng bàn thắng thì cũng có thể thấy bàn thắng này mang tính giải tỏa như thế nào",
+    "cs_terms": [
+      "darwin",
+      "nunez"
+    ]
+  },
+  {
+    "sample_id": "cs-00219",
+    "transcript": "không chỉ vậy thành tích của nunez tại đấu trường châu âu cũng rất tốt với sáu bàn thắng sau mười trận ra sân đưa đội chủ sân estadio da luz tiến thẳng vào tứ kết champions league",
+    "cs_terms": [
+      "nunez",
+      "estadio",
+      "luz",
+      "champions",
+      "league"
+    ]
+  },
+  {
+    "sample_id": "cs-00220",
+    "transcript": "trong khi ông mckinney của ngân hàng trung ương anh nói chuyện biến đổi khí hậu",
+    "cs_terms": [
+      "mckinney"
+    ]
+  },
+  {
+    "sample_id": "cs-00221",
+    "transcript": "ceo của haier ông trương thụy mẫn bị chỉ trích đến mức không dám mở cuộc họp báo về vụ việc này",
+    "cs_terms": [
+      "ceo",
+      "haier"
+    ]
+  },
+  {
+    "sample_id": "cs-00222",
+    "transcript": "google pay muốn đạt được điều này nhờ vào lợi thế công nghệ sản có của mình cũng như khả năng tích hợp rất nhanh vào các công cụ đang sử dụng hệ điều hành android do google phát hành",
+    "cs_terms": [
+      "google",
+      "android",
+      "google"
+    ]
+  },
+  {
+    "sample_id": "cs-00223",
+    "transcript": "để rồi khi đã lớn tuổi cristiano ronaldo chẳng còn duy trì được thứ vũ khí lợi hại nhất của mình nữa",
+    "cs_terms": [
+      "cristiano",
+      "ronaldo"
+    ]
+  },
+  {
+    "sample_id": "cs-00224",
+    "transcript": "chiếm đến khoảng bảy mươi phần trăm tổng giá trị vốn hóa của vn index",
+    "cs_terms": [
+      "vn",
+      "index"
+    ]
+  },
+  {
+    "sample_id": "cs-00225",
+    "transcript": "có lẽ cách tốt nhất để ngăn cản lionel messi lập siêu phẩm đá phạt đơn giản là ngăn không cho đội bóng của anh được hưởng những quả đá phạt ở cự ly thuận lợi",
+    "cs_terms": [
+      "lionel",
+      "messi"
+    ]
+  },
+  {
+    "sample_id": "cs-00226",
+    "transcript": "thưa quý vị forex hiểu nôm na là giao dịch ngoại hối là hoạt động trao đổi của một loại tiền tệ này với một loại tiền tệ khác để ăn chênh lệch tỷ giá",
+    "cs_terms": [
+      "forex"
+    ]
+  },
+  {
+    "sample_id": "cs-00227",
+    "transcript": "ten hag thừa nhận ông rất ấn tượng với phong cách của jurgen klopp cầu thủ được yêu cầu xử lý đơn giản gọn gàng và thật nhanh chóng ông yêu cầu học trò phải đoạt bóng thật nhanh mỗi khi mất bóng điều này có điểm tương đồng về gegenpressing của jurgen klopp",
+    "cs_terms": [
+      "hag",
+      "jurgen",
+      "klopp",
+      "gegenpressing",
+      "jurgen",
+      "klopp"
+    ]
+  },
+  {
+    "sample_id": "cs-00228",
+    "transcript": "ông chủ điện kremlin cam kết chúng tôi sẽ làm mọi thứ để nâng cao mức độ an ninh cho người dân tại các vùng lãnh thổ này",
+    "cs_terms": [
+      "kremlin"
+    ]
+  },
+  {
+    "sample_id": "cs-00229",
+    "transcript": "như vậy có nghĩa chưa đầy một năm sau khi thế giới chia tay đợt el nino mạnh nhất trong hai thập niên hiện tượng thời tiết khắc nghiệt này có thể sắp quay trở lại",
+    "cs_terms": [
+      "el",
+      "nino"
+    ]
+  },
+  {
+    "sample_id": "cs-00230",
+    "transcript": "trong cái tương lai tìm được nhiều cái người nông dâb trong cộng đồng kết hợp những cái hạ tầng mà làm tốt á tạo điều kiện thuận lợi đó thì người nông dân sẽ tham gia nhiều hơn",
+    "cs_terms": [
+      "dâb"
+    ]
+  },
+  {
+    "sample_id": "cs-00231",
+    "transcript": "đầu tiên chúng ta cùng đến với một trong số những tiền đạo xuất sắc nhất premier league ở thời điểm hiện tại người đang chắp cánh cho arsenal bay cao trên bảng xếp hạng gabriel jesus",
+    "cs_terms": [
+      "premier",
+      "league",
+      "arsenal",
+      "gabriel",
+      "jesus"
+    ]
+  },
+  {
+    "sample_id": "cs-00232",
+    "transcript": "sau hai trận thua liên tiếp trên sân nhà arema tiếp tục phong độ không tốt khi để thua persebaya với tỷ số chung cuộc hai ba",
+    "cs_terms": [
+      "arema",
+      "persebaya"
+    ]
+  },
+  {
+    "sample_id": "cs-00233",
+    "transcript": "ờ cái cái góp ý này thực sự là rất cần thiết dành cho những bạn nam giới mà thích mua flip còn nữ giới thì mình nghĩ là chắc là cũng không quá quan trọng đâu tại vì là nữ giới họ sẽ bỏ trong túi xách",
+    "cs_terms": [
+      "flip"
+    ]
+  },
+  {
+    "sample_id": "cs-00234",
+    "transcript": "thưa quý vị và các bạn thỏa thuận cách giảm sản lượng của opec brexit bầu cử mỹ là những yếu tố làm nên một năm nhiều sóng gió và bất ngờ trên thị trường thế giới",
+    "cs_terms": [
+      "opec",
+      "brexit"
+    ]
+  },
+  {
+    "sample_id": "cs-00235",
+    "transcript": "còn về phía omonia nicosia đội bóng này chưa được điểm số nào sau hai vòng đấu và hiện xếp bét bảng",
+    "cs_terms": [
+      "omonia",
+      "nicosia"
+    ]
+  },
+  {
+    "sample_id": "cs-00236",
+    "transcript": "tuy nhiên liveshow dòng sông đa tình như là một định mệnh là duyên lành trời định đối với người nghệ sĩ dòng sông đa tình sẽ là cuốn tự truyện bằng âm nhạc về cuộc đời của nghệ sĩ ưu tú tố nga",
+    "cs_terms": [
+      "liveshow"
+    ]
+  },
+  {
+    "sample_id": "cs-00237",
+    "transcript": "bãi biển navagio hay còn được gọi là bãi tàu đắm là một trong những bãi biển nổi tiếng ở hy lạp",
+    "cs_terms": [
+      "navagio"
+    ]
+  },
+  {
+    "sample_id": "cs-00238",
+    "transcript": "trong khi đó giá vàng lên sát một nghìn ba trăm ba mươi bảy đô la mỹ một ounce và đồng yên nhật tăng gần bốn phần trăm so với đô la mỹ",
+    "cs_terms": [
+      "ounce"
+    ]
+  },
+  {
+    "sample_id": "cs-00239",
+    "transcript": "phát biểu trong một sự kiện trực tuyến vừa qua thì tổng giám đốc quỹ tiền tệ quốc tế imf bà kristalina georgieva khẳng định tăng trưởng kinh tế toàn cầu năm hai ngàn không trăm hai mươi mốt vẫn ở mức sáu phần trăm không thay đổi so với mức dự báo được đưa ra hồi tháng tư",
+    "cs_terms": [
+      "imf",
+      "kristalina",
+      "georgieva"
+    ]
+  },
+  {
+    "sample_id": "cs-00240",
+    "transcript": "thì á là anh cảm ơn a các em coi cái cái video này anh nói như vậy á bông tại vì anh có nhiều hàng ngày đó anh có mấy chục đứa vậy đó nó nhắn tin cho anh á nó hỏi anh á là mình nên mua cái đồng tiền nào",
+    "cs_terms": [
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00241",
+    "transcript": "sai lầm tiếp theo ăn tỏi chiên hoặc nấu ở nhiệt độ quá cao khi tỏi được nấu ở nhiệt độ cao sẽ sản sinh ra acrylamide",
+    "cs_terms": [
+      "acrylamide"
+    ]
+  },
+  {
+    "sample_id": "cs-00242",
+    "transcript": "kính thưa quý vị theo reuters ngân hàng trung ương ukraine có khả năng sẽ giữ nguyên lãi suất ở mức bảy phẩy năm phần trăm trong tuần này nguyên nhân là do nhiều ý kiến cho rằng lạm phát sẽ chậm lại trong những tháng tới",
+    "cs_terms": [
+      "reuters",
+      "ukraine"
+    ]
+  },
+  {
+    "sample_id": "cs-00243",
+    "transcript": "phú yên còn được biết đến với địa danh là ghềnh đá dĩa là một tuyệt tác mà thiên nhiên đã ban tặng cho người dân xứ nẫu hơn nữa ghềnh đá dĩa ở phú yên nằm trong top năm ghềnh đá dĩa đẹp nhất trên thế giới",
+    "cs_terms": [
+      "top"
+    ]
+  },
+  {
+    "sample_id": "cs-00244",
+    "transcript": "nhưng giờ mọi chuyện đã khá hơn rất nhiều nhờ sự xuất hiện của lisandro và các cổ động viên của quỷ đỏ kỳ vọng anh sẽ cản bước binh đoàn áo xanh",
+    "cs_terms": [
+      "lisandro"
+    ]
+  },
+  {
+    "sample_id": "cs-00245",
+    "transcript": "thêm vào đó việc thao túng một giao dịch trên sổ cái bitcoin phi tập trung lại gần như không thể bởi vì các giao dịch liên tục được kiểm tra và đối chiếu với tất cả các giao dịch được gửi đến hàng ngàn máy tính để xác nhận tính hợp lệ",
+    "cs_terms": [
+      "bitcoin"
+    ]
+  },
+  {
+    "sample_id": "cs-00246",
+    "transcript": "thỏa thuận hợp tác này được gia hạn hàng năm lần cuối cùng vào tháng một ờ mười mười năm hai ngàn không trăm hai mươi theo thỏa thuận mới vừa được gia hạn thì hai bên nhất trí hoán đổi tiền tệ bằng đồng nội tệ với tổng trị giá chín phẩy năm tỷ đô la singapore",
+    "cs_terms": [
+      "singapore"
+    ]
+  },
+  {
+    "sample_id": "cs-00247",
+    "transcript": "các quy định pháp luật này đòi hỏi bạn xác thực danh tính trong quá trình khởi tạo tài khoản và mua bitcoin bằng các phương thức thanh toán truyền thống",
+    "cs_terms": [
+      "bitcoin"
+    ]
+  },
+  {
+    "sample_id": "cs-00248",
+    "transcript": "cám ơn bạn đã xem video trên kênh người thành công đừng quên lại nhấn nút đăng ký và xem thêm những video mới để ủng hộ nhóm nhé",
+    "cs_terms": [
+      "video",
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00249",
+    "transcript": "rất là ok mình cảm nhận của ờ cảm nhận của mình thì thấy là ngô nếp ờ trồng ở cái trang trại quang linh farm này",
+    "cs_terms": [
+      "ok",
+      "farm"
+    ]
+  },
+  {
+    "sample_id": "cs-00250",
+    "transcript": "chẳng hạn như granit xhaka một trường hợp tưởng như bỏ đi mà giờ lại đang đá như một cầu thủ top đầu thế giới",
+    "cs_terms": [
+      "granit",
+      "xhaka",
+      "top"
+    ]
+  },
+  {
+    "sample_id": "cs-00252",
+    "transcript": "để mà mua gói bảo hành vàng bảo hành tỏi thiếc gì cả không cần phải mua mặc định là chúng ta sẽ có luôn cái điều đó và hiện tại thì ờ tech tám tám đang có hai cơ sở",
+    "cs_terms": [
+      "tech"
+    ]
+  },
+  {
+    "sample_id": "cs-00253",
+    "transcript": "không chỉ tiết kiệm lên đến sáu mươi phần trăm chi phí so với mua trực tiếp gói cước hội viên cao cấp của fonos",
+    "cs_terms": [
+      "fonos"
+    ]
+  },
+  {
+    "sample_id": "cs-00254",
+    "transcript": "các bạn có biết phát minh cổ đại nào vượt thời đại như minh đức vừa kể bên trên không hãy để lại bình luận bên dưới video để minh đức được biết và đừng quên ấn đăng ký kênh like share nếu bạn thấy video ý nghĩa",
+    "cs_terms": [
+      "video",
+      "like",
+      "share",
+      "video"
+    ]
+  },
+  {
+    "sample_id": "cs-00255",
+    "transcript": "và erling haaland chẳng làm các đồng đội phải thất vọng với khả năng ghi bàn hủy diệt mười chín bàn thắng trên mọi đấu trường từ đầu mùa khiến tiền đạo người na uy trở thành nỗi khiếp sợ với mọi hàng thủ trên thế giới",
+    "cs_terms": [
+      "erling",
+      "haaland"
+    ]
+  },
+  {
+    "sample_id": "cs-00256",
+    "transcript": "cảm ơn quý vị và các bạn đã quan tâm theo dõi và đừng quên ấn like subcribe ủng hộ kênh của chúng tôi",
+    "cs_terms": [
+      "like",
+      "subcribe"
+    ]
+  },
+  {
+    "sample_id": "cs-00257",
+    "transcript": "trong khi đó người phát ngôn dmitry peskov của tổng thống nga putin nhấn mạnh điện kremlin không có thông tin về việc nga mua uav của iran và vấn đề này cần được chuyển cho bộ quốc phòng",
+    "cs_terms": [
+      "dmitry",
+      "peskov",
+      "putin",
+      "kremlin",
+      "uav",
+      "iran"
+    ]
+  },
+  {
+    "sample_id": "cs-00258",
+    "transcript": "chân sút người argentina đã phải trải qua quá trình khổ luyện không biết mệt mỏi khi bắt đầu sự nghiệp lionel messi chưa bao giờ được đánh giá cao ở khoản sút phạt",
+    "cs_terms": [
+      "argentina",
+      "lionel",
+      "messi"
+    ]
+  },
+  {
+    "sample_id": "cs-00259",
+    "transcript": "đặc biệt khi vn index tiếp tục tiến tới những đỉnh cao mới và vốn hóa ngành ngân hàng vẫn chiếm tỷ trọng lớn nhất thị trường",
+    "cs_terms": [
+      "vn",
+      "index"
+    ]
+  },
+  {
+    "sample_id": "cs-00260",
+    "transcript": "theo trang tin forbes deep speed còn vượt trội hơn so với các hệ thống google speed api microsoft bing speed và apple dictation về tỷ lệ tránh bị lỗi từ trong môi trường nhiễu âm thanh",
+    "cs_terms": [
+      "forbes",
+      "deep",
+      "speed",
+      "google",
+      "speed",
+      "api",
+      "microsoft",
+      "bing",
+      "speed",
+      "apple",
+      "dictation"
+    ]
+  },
+  {
+    "sample_id": "cs-00261",
+    "transcript": "đúng rồi có chỉ có bốn năm trade năm sáu trade thôi à mà trong mấy ngàn trade lận mà anh làm vậy được chỉ có mấy lần thôi",
+    "cs_terms": [
+      "trade",
+      "trade",
+      "trade"
+    ]
+  },
+  {
+    "sample_id": "cs-00262",
+    "transcript": "ờ mỗi người có một cái cách nhìn về cái thế giới ảo nó như thế nào có một số người thì người ta nghĩ rằng ờ metaverse sẽ là ờ khi mà mang cái mắt kính vô",
+    "cs_terms": [
+      "metaverse"
+    ]
+  },
+  {
+    "sample_id": "cs-00263",
+    "transcript": "ngày nay chúng ta không còn phải lo nghĩ việc gửi email quốc tế nữa vì chẳng khác gì so với hình thức gửi email cho ai đó cùng văn phòng",
+    "cs_terms": [
+      "email",
+      "email"
+    ]
+  },
+  {
+    "sample_id": "cs-00264",
+    "transcript": "bức xạ uv có liên quan đến một số bệnh lý mắt bao gồm thoái hóa điểm vàng do tuổi tác mộng thịt bệnh giác mạc hình chóp và chứng loạn dưỡng fuchs",
+    "cs_terms": [
+      "uv",
+      "fuchs"
+    ]
+  },
+  {
+    "sample_id": "cs-00265",
+    "transcript": "mới đây world bank thông báo các nhà tài trợ quốc tế đã nhất trí giải ngân hai trăm tám mươi triệu đô la mỹ trong gói viện trợ để cung cấp hỗ trợ nhân đạo cho người dân afghanistan",
+    "cs_terms": [
+      "world",
+      "bank",
+      "afghanistan"
+    ]
+  },
+  {
+    "sample_id": "cs-00266",
+    "transcript": "không paypal là một tổ chức trung gian cho phép bạn dễ dàng truyền gửi tiền tệ truyền thống sang cho người khác và paypal hoạt động tương tự như một tài khoản ngân hàng truyền thống với một tổ chức tài chính",
+    "cs_terms": [
+      "paypal",
+      "paypal"
+    ]
+  }
+]

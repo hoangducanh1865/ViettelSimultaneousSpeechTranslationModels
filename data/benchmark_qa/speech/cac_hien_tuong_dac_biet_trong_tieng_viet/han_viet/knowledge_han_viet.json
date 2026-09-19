@@ -1,0 +1,1751 @@
+{
+  "schema_version": "1.0",
+  "task": "han_viet",
+  "variant": null,
+  "generated_at": "2026-09-17T20:12:04.011447+00:00",
+  "relay_meta": {
+    "model_order": [
+      "gemini",
+      "chatgpt",
+      "claude"
+    ],
+    "rounds_completed": 5,
+    "max_rounds": 5,
+    "stopped_reason": "max_rounds",
+    "consensus_round": null
+  },
+  "words": [
+    {
+      "word": "độc lập",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "tự mình tồn tại, tự chủ, không phụ thuộc hoặc không bị lệ thuộc vào bên ngoài",
+        "category_hint": "Chính trị / Xã hội",
+        "historical_fact": "Bản Tuyên ngôn Độc lập do Chủ tịch Hồ Chí Minh đọc ngày 2/9/1945 tại Quảng trường Ba Đình."
+      },
+      "extra_fields": {
+        "STT": "1",
+        "Ghi Chú": "source_id=qa_050bebee7882c6ec3b19"
+      },
+      "notes": ""
+    },
+    {
+      "word": "giải phóng",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "làm cho được tự do, cởi bỏ trói buộc",
+        "category_hint": "Chính trị / Y học",
+        "historical_fact": "Ngày Giải phóng miền Nam, thống nhất đất nước 30/4/1975."
+      },
+      "extra_fields": {
+        "STT": "2",
+        "Ghi Chú": "source_id=qa_0a70809d8e7bec20670b"
+      },
+      "notes": ""
+    },
+    {
+      "word": "hy sinh",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "từ bỏ quyền lợi, tính mạng vì mục đích cao cả",
+        "category_hint": "Xã hội / Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "3",
+        "Ghi Chú": "source_id=qa_10ae7a28aadf8fd686c1"
+      },
+      "notes": ""
+    },
+    {
+      "word": "đồng bào",
+      "status": "corrected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "những người cùng một nước, cùng một cộng đồng dân tộc; cách gọi thể hiện ý thức cùng chung nguồn gốc",
+        "category_hint": "Xã hội / Chính trị",
+        "historical_fact": "Trong Tuyên ngôn Độc lập ngày 2/9/1945, Chủ tịch Hồ Chí Minh mở đầu bằng lời 'Hỡi đồng bào cả nước!'."
+      },
+      "extra_fields": {
+        "STT": "4",
+        "Ghi Chú": "source_id=qa_1390f1080bd89385f5be"
+      },
+      "notes": ""
+    },
+    {
+      "word": "lào",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "tự chủ",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "5",
+        "Ghi Chú": "source_id=qa_14df67fdfff8e9a94b45"
+      },
+      "notes": "Địa danh/tên quốc gia, không phải từ Hán Việt nghĩa 'tự chủ'."
+    },
+    {
+      "word": "là",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "tự chủ",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "6",
+        "Ghi Chú": "source_id=qa_17eccd0451e3dffa2d3c"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "cái",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "đời người",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "7",
+        "Ghi Chú": "source_id=qa_1aea6f03057f9e33858a"
+      },
+      "notes": "Từ thuần Việt (lượng từ)."
+    },
+    {
+      "word": "tổ quốc",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "đất nước của ông cha, đất nước mình",
+        "category_hint": "Chính trị / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "8",
+        "Ghi Chú": "source_id=qa_1b02d36f8eb8986b069f"
+      },
+      "notes": ""
+    },
+    {
+      "word": "à",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "tự chủ",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "9",
+        "Ghi Chú": "source_id=qa_26f3e11b3fd8e1ab85fb"
+      },
+      "notes": "Từ thuần Việt (thán từ)."
+    },
+    {
+      "word": "đế quốc",
+      "status": "corrected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "nhà nước hoặc quốc gia theo đuổi sự bành trướng, thống trị và thường là xâm lược các lãnh thổ khác; trong lịch sử cũng dùng cho các đế chế do hoàng đế đứng đầu",
+        "category_hint": "Chính trị / Lịch sử",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "10",
+        "Ghi Chú": "source_id=qa_35586f80d2b07e75460a"
+      },
+      "notes": ""
+    },
+    {
+      "word": "thắm",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "quê hương",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "11",
+        "Ghi Chú": "source_id=qa_3dcbf9fe2c3e889be027"
+      },
+      "notes": "Từ thuần Việt (màu sắc)."
+    },
+    {
+      "word": "được",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người cùng nước",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "12",
+        "Ghi Chú": "source_id=qa_3f01e2caceb454857421"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "nhân sinh",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "cuộc sống của con người, kiếp người",
+        "category_hint": "Triết học / Tôn giáo",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "13",
+        "Ghi Chú": "source_id=qa_7132d539bc0622178353"
+      },
+      "notes": ""
+    },
+    {
+      "word": "tồn vong",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "sự còn hay mất, sống hay chết",
+        "category_hint": "Xã hội / Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "14",
+        "Ghi Chú": "source_id=qa_776348fd67dcdb5b4495"
+      },
+      "notes": ""
+    },
+    {
+      "word": "ở",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người cùng nước",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "15",
+        "Ghi Chú": "source_id=qa_8ba8ba78b2592b75b460"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "trong",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "vẻ vang",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "16",
+        "Ghi Chú": "source_id=qa_8c7f38950b17169e1bdc"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "nơi",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "hi sinh vì nghĩa",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "17",
+        "Ghi Chú": "source_id=qa_ad8420f4e2672063b225"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "cấu trúc",
+      "status": "corrected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "sự sắp xếp, tổ chức các thành phần tạo nên một chỉnh thể",
+        "category_hint": "Khoa học / Kỹ thuật",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "18",
+        "Ghi Chú": "source_id=qa_b44a85efcfede3cc36f4",
+        "Original_Word": "trúc"
+      },
+      "notes": ""
+    },
+    {
+      "word": "vinh quang",
+      "status": "confirmed",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "vẻ vang, rực rỡ, được kính trọng",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "19",
+        "Ghi Chú": "source_id=qa_c6293bd42e9b8cf36131"
+      },
+      "notes": ""
+    },
+    {
+      "word": "đó",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người cùng nước",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "20",
+        "Ghi Chú": "source_id=qa_c63532aa79cb9739dfda"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "đối tượng",
+      "status": "corrected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người hoặc vật được hướng tới trong một hành động, nhận thức",
+        "category_hint": "Hành chính / Khoa học",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "21",
+        "Ghi Chú": "source_id=qa_cac47af9b68912c60982",
+        "Original_Word": "tượng"
+      },
+      "notes": ""
+    },
+    {
+      "word": "với",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "tự chủ",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "22",
+        "Ghi Chú": "source_id=qa_cfda134b36d9bfa5725e"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "như",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người cùng nước",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "23",
+        "Ghi Chú": "source_id=qa_d872689dc3c1563ed65a"
+      },
+      "notes": "Từ thuần Việt."
+    },
+    {
+      "word": "ra.",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "hi sinh vì nghĩa",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "24",
+        "Ghi Chú": "source_id=qa_dd03551f195478398d26"
+      },
+      "notes": "Từ thuần Việt bị nhiễu dấu câu."
+    },
+    {
+      "word": "đâu.",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "vẻ vang",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "25",
+        "Ghi Chú": "source_id=qa_e9aea6aebd3412a5ed7b"
+      },
+      "notes": "Từ thuần Việt bị nhiễu dấu câu."
+    },
+    {
+      "word": "phát triển",
+      "status": "corrected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "mở mang, tiến triển lên mức độ cao hơn",
+        "category_hint": "Kinh tế / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "26",
+        "Ghi Chú": "source_id=qa_ea9af8dedae5ad415cb0",
+        "Original_Word": "phát"
+      },
+      "notes": ""
+    },
+    {
+      "word": "chân",
+      "status": "rejected",
+      "source": "existing_csv",
+      "fields": {
+        "meaning": "người cùng nước",
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {
+        "STT": "27",
+        "Ghi Chú": "source_id=qa_fea04c8ec0ec69d954da"
+      },
+      "notes": "Cẳng chân, từ thuần Việt."
+    },
+    {
+      "word": "quốc gia",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nước nhà, đất nước",
+        "category_hint": "Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "giang sơn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "sông núi, chỉ đất nước",
+        "category_hint": "Chính trị / Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "vãng lai",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "qua lại, đi và đến",
+        "category_hint": "Hành chính / Giao thông",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "thổ huyết",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hộc máu",
+        "category_hint": "Y học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "phu nhân",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cách gọi trang trọng, tôn xưng vợ của người có địa vị/chức tước cao; trong nghĩa cổ có các phạm vi dùng khác",
+        "category_hint": "Xã hội / Lễ nghi",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "huynh đệ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "anh em",
+        "category_hint": "Gia đình",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "bằng hữu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "bạn bè",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "thiên thu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "ngàn năm, mãi mãi",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "thảo mộc",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cây cỏ",
+        "category_hint": "Sinh học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "phu quân",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "chồng (cách gọi trang trọng)",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "y học",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "ngành khoa học về phòng và chữa bệnh",
+        "category_hint": "Y khoa",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "giáo viên",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "người dạy học",
+        "category_hint": "Giáo dục",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "học sinh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "người đi học",
+        "category_hint": "Giáo dục",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "giáo dục",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "dạy dỗ, bồi dưỡng con người",
+        "category_hint": "Xã hội / Giáo dục",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "quốc hội",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cơ quan đại biểu của nhân dân và cơ quan quyền lực nhà nước theo hệ thống chính trị của một quốc gia",
+        "category_hint": "Chính trị",
+        "historical_fact": "Quốc hội khóa I của nước Việt Nam Dân chủ Cộng hòa được bầu qua cuộc Tổng tuyển cử ngày 6/1/1946."
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "chính phủ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cơ quan thực hiện quyền hành pháp và điều hành hoạt động của nhà nước",
+        "category_hint": "Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "dân chủ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "chế độ hoặc nguyên tắc trong đó quyền lực chính trị thuộc về nhân dân",
+        "category_hint": "Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "kinh doanh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tổ chức hoạt động sản xuất, buôn bán để sinh lời",
+        "category_hint": "Kinh tế",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "tài chính",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "các quan hệ tiền tệ, quản lý tiền bạc",
+        "category_hint": "Kinh tế",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "ngân hàng",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tổ chức tài chính kinh doanh tiền tệ",
+        "category_hint": "Kinh tế",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cộng đồng",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tập thể người cùng sống, có điểm chung",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "xã hội",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tập thể người sống chung, có tổ chức và quy luật",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "nhân dân",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "người dân trong một nước",
+        "category_hint": "Chính trị / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "văn hóa",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "những giá trị vật chất và tinh thần do con người sáng tạo ra",
+        "category_hint": "Văn hóa",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "nghệ thuật",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hoạt động sáng tạo ra cái đẹp",
+        "category_hint": "Văn hóa / Nghệ thuật",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "phong tục",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "thói quen, tập quán ăn sâu vào đời sống",
+        "category_hint": "Văn hóa",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "gia đình",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nhóm người gắn bó bằng quan hệ hôn nhân, huyết thống",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "phụ mẫu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cha mẹ",
+        "category_hint": "Gia đình",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "từ mẫu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "người mẹ hiền; trong cách dùng quen thuộc 'như từ mẫu' chỉ sự chăm sóc, nhân hậu như người mẹ",
+        "category_hint": "Y học / Đạo đức",
+        "historical_fact": "Trong thư gửi Hội nghị cán bộ Y tế toàn quốc ngày 27/2/1955, Chủ tịch Hồ Chí Minh viết lời dạy 'Lương y phải như từ mẫu'."
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "tiên tổ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "ông tổ, thế hệ đi trước",
+        "category_hint": "Gia đình / Tôn giáo",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "viễn tổ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tổ tiên xa xưa",
+        "category_hint": "Gia đình",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "quả phụ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "người phụ nữ góa chồng",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "trưởng huynh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "anh cả",
+        "category_hint": "Gia đình",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "chư huynh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "các anh",
+        "category_hint": "Xã hội / Gia đình",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "quý đệ",
+      "status": "rejected",
+      "source": "web_research",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "thủy điện",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "điện năng được sản xuất từ năng lượng của dòng nước, thường qua tua-bin và máy phát điện",
+        "category_hint": "Kỹ thuật / Năng lượng",
+        "historical_fact": "Nhà máy thủy điện Hòa Bình trên sông Đà khánh thành ngày 20/12/1994."
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "phi cơ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "máy bay",
+        "category_hint": "Giao thông / Kỹ thuật",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "tồn tại",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hiện hữu, có thật",
+        "category_hint": "Triết học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "thiên nhiên",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "thế giới vật chất bao quanh con người, tự nhiên",
+        "category_hint": "Khoa học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "ba đào",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "sóng lớn, ví cảnh gian nan, hiểm nghèo",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "bi hoan",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "buồn đau và vui vẻ",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thường gặp trong cụm 'bi hoan ly hợp'."
+    },
+    {
+      "word": "biệt nhỡn",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cái nhìn đặc biệt, sự trân trọng đặc biệt dành cho người có tài",
+        "category_hint": "Văn học / Xã hội",
+        "historical_fact": "Nguyên văn 'Chữ người tử tù' (Nguyễn Tuân): \"Ta cảm cái tấm lòng biệt nhỡn liên tài của các người.\""
+      },
+      "extra_fields": {
+        "variant_trang_trong": "biệt nhãn (âm Hán Việt chuẩn của 眼)"
+      },
+      "notes": "Sửa lại: bản gốc 'Chữ người tử tù' (SGK Ngữ văn 10, Kết nối tri thức) dùng đúng dạng 'biệt nhỡn', không phải 'biệt nhãn' như vòng trước đã đổi nhầm."
+    },
+    {
+      "word": "ca dao",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "thơ ca dân gian truyền miệng",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cảm khái",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "xúc động, ngậm ngùi trước sự việc",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "chuyên tinh",
+      "status": "rejected",
+      "source": "web_research",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cáo chung",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "kết thúc, chấm dứt, suy tàn hoặc sụp đổ; thường dùng cho một chế độ, thời kỳ, trào lưu hay sự việc",
+        "category_hint": "Chính trị / Lịch sử / Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cẩn cáo",
+      "status": "rejected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "kính cẩn báo/trình",
+        "category_hint": "Văn bản cổ / Hành chính - nghi lễ",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cập nhật",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đưa thêm thông tin mới nhất vào; làm cho thông tin, dữ liệu hoặc trạng thái trở nên mới và phù hợp với hiện tại",
+        "category_hint": "Công nghệ / Hành chính",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cật vấn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hỏi vặn vẹo, truy vấn cặn kẽ",
+        "category_hint": "Pháp luật / Hành chính",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "chất vấn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đặt câu hỏi yêu cầu giải thích, làm rõ trách nhiệm",
+        "category_hint": "Chính trị / Pháp luật",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "chí lý",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "rất có lý, hoàn toàn đúng đắn",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cổ vũ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "kích thích tinh thần, động viên",
+        "category_hint": "Xã hội / Thể thao",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cơ hàn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đói và rét, chỉ hoàn cảnh nghèo khổ",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cơ sở",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nền tảng, nền móng ban đầu",
+        "category_hint": "Hành chính / Khoa học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "củng cố",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "làm cho vững chắc thêm",
+        "category_hint": "Quân sự / Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cừ khôi",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tài giỏi, xuất chúng hơn người; nghĩa gốc cổ còn chỉ người đứng đầu, thủ lĩnh",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cước chú",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "ghi chú ở cuối trang sách",
+        "category_hint": "Xuất bản / Giáo dục",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "cương lĩnh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đường lối, mục tiêu cơ bản của một tổ chức",
+        "category_hint": "Chính trị",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "danh dự",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "tiếng tăm tốt, giá trị đạo đức được công nhận",
+        "category_hint": "Xã hội / Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "dĩnh ngộ",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "có vẻ mặt sáng sủa, trông thông minh, lanh lợi",
+        "category_hint": "Giáo dục / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "dư luận",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "ý kiến chung của số đông trong xã hội",
+        "category_hint": "Xã hội / Truyền thông",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "đa đoan",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nhiều mối lo nghĩ, rắc rối",
+        "category_hint": "Tâm lý / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "đạo mạo",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "vẻ ngoài nghiêm trang, đứng đắn",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "điềm nhiên",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "bình thản, như không có chuyện gì xảy ra",
+        "category_hint": "Tâm lý",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "điểm xuyết",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "trang điểm, tô điểm thêm một vài nét",
+        "category_hint": "Nghệ thuật / Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "đơn cử",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nêu một ví dụ tiêu biểu, cụ thể để minh họa",
+        "category_hint": "Hành chính / Giáo dục",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "giai thoại",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "câu chuyện thú vị được truyền tụng",
+        "category_hint": "Văn hóa / Lịch sử",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hàm tiếu",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đang hé nở, mới chớm nở (thường nói về nụ hoa); nghĩa bóng có thể gợi nét cười e ấp",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hàn huyên",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hỏi han về tâm sự, lạnh ấm (trò chuyện thân tình)",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hấp dẫn",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "cuốn hút, lôi kéo sự chú ý",
+        "category_hint": "Tâm lý / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hậu thuẫn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "sự hỗ trợ, che chở từ phía sau",
+        "category_hint": "Chính trị / Quân sự",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hiếu sinh",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "quý trọng sự sống, không nỡ giết hại",
+        "category_hint": "Tôn giáo / Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "hồ nghi",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nghi ngờ, không tin tưởng",
+        "category_hint": "Tâm lý",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "huy hoàng",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "sáng chói, rực rỡ, vẻ vang",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khách sạn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "nơi kinh doanh lưu trú cho khách",
+        "category_hint": "Kinh tế / Du lịch",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khách sáo",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "thái độ xã giao lịch sự bề ngoài, không tự nhiên",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khai khẩn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "khai phá đất hoang để trồng trọt",
+        "category_hint": "Nông nghiệp / Lịch sử",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khải hoàn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "chiến thắng trở về",
+        "category_hint": "Quân sự",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khang trang",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "rộng rãi, đẹp đẽ, sáng sủa (thường chỉ nhà cửa)",
+        "category_hint": "Xây dựng",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khoan hậu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "khoan dung và nhân hậu",
+        "category_hint": "Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khổ sở",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "chịu nhiều khó nhọc, đau khổ",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khôi hài",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "vui nhộn, gây cười",
+        "category_hint": "Nghệ thuật / Tâm lý",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khuất tất",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "che giấu việc mờ ám, không minh bạch",
+        "category_hint": "Pháp luật / Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "khứ hồi",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "đi và về (hai chiều)",
+        "category_hint": "Giao thông",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "kịch tính",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "có tính chất căng thẳng, bất ngờ, giàu xung đột như kịch",
+        "category_hint": "Nghệ thuật / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "kiến văn",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "những điều nghe thấy, hiểu biết",
+        "category_hint": "Giáo dục / Văn hóa",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "ký thác",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "gửi gắm tâm sự, niềm tin",
+        "category_hint": "Văn học / Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "kỳ cựu",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "sống lâu, làm lâu năm, có nhiều kinh nghiệm",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "lam lũ",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "vất vả, cực nhọc, ăn mặc rách rưới",
+        "category_hint": "Xã hội",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "lập chí",
+      "status": "confirmed",
+      "source": "web_research",
+      "fields": {
+        "meaning": "quyết tâm đi tới một mục đích; xác lập chí hướng",
+        "category_hint": "Giáo dục / Đạo đức",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "liên tài",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "quý trọng, cảm mến người có tài; trân trọng tài năng",
+        "category_hint": "Văn học / Xã hội",
+        "historical_fact": "Cụm 'biệt nhỡn liên tài' trong 'Chữ người tử tù' của Nguyễn Tuân thể hiện sự trân trọng tài năng của Huấn Cao."
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "luân lạc",
+      "status": "added",
+      "source": "web_research",
+      "fields": {
+        "meaning": "trôi nổi, lưu lạc long đong",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "linh lạc",
+      "status": "corrected",
+      "source": "web_research",
+      "fields": {
+        "meaning": "hoa lá héo rụng; nghĩa bóng chỉ cảnh tan tác, tản mác, suy bại",
+        "category_hint": "Văn học",
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "miên viễn",
+      "status": "rejected",
+      "source": "web_research",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": ""
+    },
+    {
+      "word": "tự do",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "bình đẳng",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "hạnh phúc",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "công dân",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "chủ nghĩa",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "cách mạng",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "kháng chiến",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "hòa bình",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "thống nhất",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "lãnh thổ",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "an ninh",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "quốc phòng",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "lịch sử",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "văn minh",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    },
+    {
+      "word": "tương lai",
+      "status": "rejected",
+      "source": "model_proposed",
+      "fields": {
+        "meaning": null,
+        "category_hint": null,
+        "historical_fact": null
+      },
+      "extra_fields": {},
+      "notes": "Thiếu bằng chứng xuất hiện trong corpus ASR."
+    }
+  ],
+  "rules": {
+    "level_1": {
+      "description": "Từ vựng Hán Việt cơ bản, quen thuộc trong đời sống hàng ngày.",
+      "distractor_strategy": "Tạo từ sai bằng cách ghép các yếu tố Hán Việt có âm gần giống nhưng sai nghĩa, hoặc dùng từ thuần Việt đồng nghĩa."
+    },
+    "level_2": {
+      "description": "Từ vựng Hán Việt dùng trong văn bản hành chính, báo chí, học thuật cơ bản.",
+      "distractor_strategy": "Sử dụng các từ Hán Việt cùng trường từ vựng nhưng sai sắc thái nghĩa hoặc sai ngữ cảnh sử dụng."
+    },
+    "level_3": {
+      "description": "Từ vựng Hán Việt cổ, văn chương, triết học hoặc học thuật chuyên sâu.",
+      "distractor_strategy": "Sử dụng các từ Hán Việt hiếm gặp khác, hoặc thay đổi một thành tố để tạo ra từ vô nghĩa nhưng nghe có vẻ cổ kính."
+    }
+  }
+}
