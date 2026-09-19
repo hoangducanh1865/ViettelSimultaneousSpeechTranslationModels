@@ -43,6 +43,8 @@ SUBCOMMANDS: dict[str, Path] = {
     "code-switching-qa": _CODE_SWITCHING / "code_switching_qa_pipeline.py",
     "inspect-qa": _BQ / "tools/inspect_qa.py",
     "fetch-datasets": _BQ / "tools/fetch_datasets.py",
+    "extend-final": _BQ / "tools/extend_final.py",
+    "failed-ids": _BQ / "tools/failed_ids.py",
     "hf-pr-push": _DSQA / "translate_datasets/hf_pr_push.py",
     "translate-dataset": _DSQA / "translate_datasets/translate_dataset.py",
 }

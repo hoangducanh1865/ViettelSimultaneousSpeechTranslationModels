@@ -50,8 +50,11 @@ sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
 import auto_model_relay
 import env_paths
+import error_log
 from knowledge_graph import load_knowledge_graph, rule, rule_addendum_text, words_index
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
+
+TASK_NAME = "tu_lay"
 
 DEFAULT_BATCH_SIZE = 25
 DEFAULT_MAX_WORKERS = 4
@@ -358,6 +361,7 @@ def _llm_batch_call(client, model, variant, items, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI llm batch, {len(items)} item] {last_error!r} -- các item này fallback rule_based.")
+    error_log.log_failures(TASK_NAME, "distractors", [it[0] for it in items], last_error)
     return {cid: None for cid, _, _, _ in items}
 
 
@@ -468,6 +472,7 @@ def _classify_level_batch_tu_lay(client, model, batch, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI phân loại level_3] batch {len(batch)} từ: {last_error!r} -- mặc định level_3_eligible=False.")
+    error_log.log_failures(TASK_NAME, "classify-levels", ids_sent, last_error)
     return {e["id"]: {"level_3_eligible": False, "cultural_fact": None, "reason": "Lỗi gọi API."} for e in batch}
 
 
@@ -579,6 +584,7 @@ def _gen_level3_batch(client, model, batch, max_retries, system_prompt):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI sinh câu hỏi level 3] batch {len(batch)}: {last_error!r} -- các mục này bị bỏ qua.")
+    error_log.log_failures(TASK_NAME, "generate-questions", ids_sent, last_error)
     return {}
 
 
@@ -1040,6 +1046,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p2.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
     p2.add_argument("--seed", type=int, default=42)
 
     p3 = sub.add_parser("generate-cloze-questions", help="Câu hỏi cloze/tone-harmony -- CHỈ variant toan_bo, bổ sung KHÔNG thay thế level 1/2/3.")
@@ -1104,6 +1111,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         client, model = _resolve()
         with open(args.input, encoding="utf-8") as f:
             entries = [json.loads(line) for line in f if line.strip()]
+            if getattr(args, "only_ids", None):
+                _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+                entries = [r for r in entries if str(r["id"]).split("__")[0] in _only]
         print(f"Đã đọc {len(entries)} entry đã phân loại mức độ.")
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
@@ -1124,6 +1134,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         client, model = _resolve()
         with open(args.input, encoding="utf-8") as f:
             entries = [json.loads(line) for line in f if line.strip()]
+            if getattr(args, "only_ids", None):
+                _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+                entries = [r for r in entries if str(r["id"]).split("__")[0] in _only]
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json))
         generate_extra_mechanic_questions(
             client, model, args.variant, entries, knowledge_graph, Path(args.output),

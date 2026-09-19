@@ -238,3 +238,6 @@ audio/
 tmp/
 # Thư mục scratch của test E2E (tự sinh lại mỗi lần chạy, không commit)
 data/_e2e/
+
+# Log sample lỗi benchmark_qa (chỉ local, không commit)
+data/logs/

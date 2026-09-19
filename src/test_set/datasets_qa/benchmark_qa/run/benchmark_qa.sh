@@ -147,6 +147,7 @@ parse_common() {
             --max-rounds)                  MAX_ROUNDS="$2"; shift 2 ;;
             --seed)                        SEED="$2"; shift 2 ;;
             --on-missing)                  ON_MISSING="$2"; shift 2 ;;
+            --rerun-mode)                  RERUN_MODE="$2"; shift 2 ;;
             --debate)                      DEBATE=1; shift ;;
             --skip-filter)                 SKIP_FILTER=1; shift ;;
             --push)                        PUSH=1; shift ;;
@@ -286,6 +287,9 @@ run_filter_2api() {
         --pre-final "$FILTER_GEM_JSONL" --kept-output "$FILTER_OAI_JSONL" --rules-output "$FILTER_OAI_RULES" \
         "${FILTER_ARGS[@]}"
     py "$MAIN_PY" finalize-qa --pre-final "$FILTER_OAI_JSONL" --final "$final" --on-missing "$ON_MISSING"
+    # Bản mở rộng: final + field debug (transcript/question_type/difficulty/level/target words...).
+    extend_final "$task" "$final" \
+        --join "${pre}::id::transcript,question_type,difficulty,level,max_level,target_word,target_terms,historical_fact,cultural_fact,base_word,region_or_ethnic_group,tone_register"
 }
 
 # =============================================================================================
@@ -398,6 +402,7 @@ cmd_debate() {
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
     [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
+    [[ ${#ONLY_IDS_ARGS[@]} -gt 0 ]] && relay_args+=("${ONLY_IDS_ARGS[@]}")
 
     py "$MAIN_PY" relay "${relay_args[@]}"
 }
@@ -412,6 +417,10 @@ cmd_han_viet() {
     _cmd_prelude "$@"
     local kg="${KNOWLEDGE_DIR}/knowledge_han_viet.json"
     set_gemini_args
+    prepare_rerun han_viet
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$HAN_VIET_DIFFICULTY_OUTPUT" "${HAN_VIET_MULTIHOP_OUTPUT%.jsonl}"*
+    fi
 
     # Bước 0: seed CSV + báo cáo độ phủ
     py "$MAIN_PY" han-viet-seed --input "$HAN_VIET_INPUT_PATH" --out-csv "$HAN_VIET_SEED_CSV"
@@ -472,6 +481,10 @@ cmd_han_viet() {
 # =============================================================================================
 cmd_phuong_ngu() {
     _cmd_prelude "$@"
+    prepare_rerun phuong_ngu
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$PHUONG_NGU_REGION_OUTPUT" "${PHUONG_NGU_QA_OUTPUT%.jsonl}"*
+    fi
     ensure_debate phuong_ngu
     set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_phuong_ngu.json"
@@ -497,6 +510,10 @@ cmd_phuong_ngu() {
 # =============================================================================================
 cmd_tu_muon() {
     _cmd_prelude "$@"
+    prepare_rerun tu_muon
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$TU_MUON_DIFFICULTY_OUTPUT" "${TU_MUON_MULTIHOP_OUTPUT%.jsonl}"*
+    fi
     ensure_debate tu_muon
     set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_muon.json"
@@ -526,6 +543,10 @@ TU_LAY_CLOZE_SAMPLES=""
 cmd_tu_lay_variant() {
     local variant="$1"
     tu_lay_variant_paths "$variant"
+    prepare_rerun tu_lay
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$TU_LAY_VARIANT_DIFFICULTY" "${TU_LAY_VARIANT_MULTIHOP%.jsonl}"*
+    fi
     ensure_debate tu_lay "$variant"
     set_gemini_args
     local kg="${KNOWLEDGE_DIR}/knowledge_tu_lay_${variant}.json"
@@ -553,6 +574,9 @@ cmd_tu_lay_cloze() {
     tu_lay_variant_paths "toan_bo"
     TU_LAY_CLOZE_SAMPLES="${TU_LAY_FINAL_DIR}/asr_samples_with_tu_lay_toan_bo_cloze.json"
     local cloze_output="${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa.jsonl"
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$cloze_output" "$(extended_final_path "${TU_LAY_FINAL_DIR}/tu_lay_toan_bo_cloze_qa_final.jsonl")"
+    fi
 
     py "$MAIN_PY" hien-tuong build-cloze-samples \
         --csv "$TU_LAY_VARIANT_CSV" --word-col "Từ láy" --base-word-col "Từ gốc (cơ sở)" \
@@ -648,6 +672,11 @@ cmd_code_switching_mmsu() {
 
 cmd_code_switching() {
     _cmd_prelude "$@"
+    prepare_rerun code_switching
+    if [[ "${RERUN_MODE}" == "fresh" ]]; then
+        run rm -f "$CS_CLASSIFIED" "$CS_MULTIHOP" "$CS_GEMINI_KEPT" "$CS_OPENAI_KEPT" \
+            "$CS_OPENAI_KEPT_FINAL" "$(extended_final_path "$CS_OPENAI_KEPT_FINAL")"
+    fi
 
     # 1. Chuẩn bị dữ liệu thật (GigaSpeech2-vi scan từ điển + hợp nhất ViMed)
     py "$MAIN_PY" code-switching scan-dictionary --location "$LOCATION"
@@ -665,9 +694,10 @@ cmd_code_switching() {
     [[ -n "$OPENAI_BASE_URL" ]] && relay_args+=(--openai-base-url "$OPENAI_BASE_URL")
     [[ -n "$OPENAI_API_KEY_FILE" ]] && relay_args+=(--openai-api-key-file "$OPENAI_API_KEY_FILE")
     [[ -n "$ENV_FILE" ]] && relay_args+=(--env-file "$ENV_FILE")
+    [[ ${#ONLY_IDS_ARGS[@]} -gt 0 ]] && relay_args+=("${ONLY_IDS_ARGS[@]}")
     py "$MAIN_PY" relay "${relay_args[@]}"
 
-    # 3. Sinh câu hỏi
+    # 3. Sinh câu hỏi (resumable: tự bỏ qua câu đã có -> rerun chỉ sinh phần thiếu)
     py "$MAIN_PY" code-switching-qa classify-cs --location "$LOCATION"
     py "$MAIN_PY" code-switching-qa generate-questions --location "$LOCATION"
 
@@ -692,6 +722,11 @@ cmd_code_switching() {
         py "$MAIN_PY" code-switching-qa filter-questions "${oai_filter_args[@]}"
         py "$MAIN_PY" finalize-qa --pre-final "$CS_OPENAI_KEPT" --final "$CS_OPENAI_KEPT_FINAL" --on-missing "$ON_MISSING"
     fi
+
+    # 5. Bản mở rộng: final + transcript/question_type/target_terms/difficulty.
+    local ext_joins=(--join "${CS_CLASSIFIED}::base_id::transcript=text")
+    [[ -f "$CS_OPENAI_KEPT" ]] && ext_joins+=(--join "${CS_OPENAI_KEPT}::id::question_type,target_terms,dataset_source,difficulty")
+    extend_final code_switching "$CS_OPENAI_KEPT_FINAL" "${ext_joins[@]}"
 }
 
 # =============================================================================================

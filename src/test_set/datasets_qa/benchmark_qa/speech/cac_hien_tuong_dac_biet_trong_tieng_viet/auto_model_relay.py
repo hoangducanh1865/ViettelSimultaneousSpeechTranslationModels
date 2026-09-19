@@ -72,6 +72,7 @@ from typing import Callable, Optional
 from tqdm.auto import tqdm
 
 import env_paths
+import error_log
 from knowledge_graph import SCHEMA_VERSION
 
 DEFAULT_MODEL_ORDER = ["gemini", "openai"]
@@ -541,6 +542,30 @@ def manual_turn_io(
         return response_path.read_text(encoding="utf-8")
 
 
+def _seed_sample_ids(seed: dict) -> list[str]:
+    """base sample id (hoặc word) của mọi candidate trong 1 batch seed -- để log lỗi."""
+    units = seed.get("candidate_units") or []
+    if units:
+        return [str(u.get("id")) for u in units if u.get("id")]
+    words = seed.get("candidate_words") or []
+    if words:
+        return [str(w.get("word")) for w in words if w.get("word")]
+    return []
+
+
+def filter_seed_by_ids(seed: dict, ids: Optional[set]) -> dict:
+    """Chỉ giữ các candidate có base id (hoặc word) nằm trong `ids` -- dùng cho rerun-mode failed."""
+    if not ids:
+        return seed
+    ids = {str(i).split("__")[0] for i in ids}
+    out = dict(seed)
+    for key in ("candidate_units", "candidate_words"):
+        if key in seed and isinstance(seed[key], list):
+            out[key] = [u for u in seed[key]
+                        if error_log.base_id(u.get("id") or u.get("word")) in ids]
+    return out
+
+
 def run_turn(
     task: str, variant: Optional[str], seed: dict, state: RelayState, model: str, *,
     debate_mode: str = "api",
@@ -612,6 +637,8 @@ def run_turn(
                 time.sleep(2 ** attempt)
 
     print_fn(f"[LỖI] lượt {model} (round {round_index}) thất bại sau {max_retries} lần thử: {last_error!r} -- bỏ qua lượt này.")
+    # Log sample lỗi để `--rerun-mode failed` chạy lại đúng batch này.
+    error_log.log_failures(task, "debate", _seed_sample_ids(seed), last_error, model=model)
     turn = Turn(round_index, turn_index, model, prompt, last_response or "", None, None)
     state.turns.append(turn)
     if log_dir is not None:
@@ -1075,6 +1102,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--max-workers", type=int, default=4, help="Số batch chạy song song (chỉ áp dụng --debate-mode api -- manual luôn chạy tuần tự).")
     p1.add_argument("--log-dir", default=None, help="Optional: ghi lại prompt/response từng lượt để audit.")
     p1.add_argument("--resume", action="store_true", help="Tiếp tục từ --state-output (hoặc các file batch tương ứng) nếu đã tồn tại.")
+    p1.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại các sample này (rerun-mode failed).")
 
     p2 = sub.add_parser("show", help="In lại trạng thái relay đã lưu (không chạy lại).")
     p2.add_argument("--state", required=True)
@@ -1084,6 +1112,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.command == "run":
         with open(args.seed_json, encoding="utf-8") as f:
             seed = json.load(f)
+
+        if getattr(args, "only_ids", None):
+            with open(args.only_ids, encoding="utf-8") as f:
+                only_ids = set(json.load(f))
+            seed = filter_seed_by_ids(seed, only_ids)
+            print(f"[rerun] Chỉ chạy lại {len(only_ids)} sample lỗi trong seed.")
 
         suffix = f"_{args.task}" + (f"_{args.variant}" if args.variant else "")
         state_path = Path(args.state_output) if args.state_output else env_paths.knowledge_dir(args.location) / f"relay_state{suffix}.json"

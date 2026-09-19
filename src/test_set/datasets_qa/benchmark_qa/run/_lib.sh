@@ -42,6 +42,7 @@ _load_env_file "${_RUN_DIR}/.env"
 : "${LOCATION:=drive}"
 : "${PYTHON:=python3}"
 : "${DEBATE_MODE:=api}"                 # api (2 API tự debate) hoặc manual (copy-paste) -- 2 chế độ chạy Y HỆT các bước sau
+: "${RERUN_MODE:=fresh}"                # fresh (chạy mới, ghi đè) hoặc failed (chỉ chạy lại sample lỗi)
 : "${DRY_RUN:=0}"
 # Model + base_url ĐỊNH NGHĨA TRONG CODE (auto_model_relay.DEFAULT_*), KHÔNG đặt default ở đây.
 # Chỉ truyền xuống pipeline khi user override qua flag (rỗng = để code tự chọn model theo vai).
@@ -96,9 +97,11 @@ resolve_paths() {
     # --- Code-switching + knowledge dir dùng CÙNG layout tương đối cho cả drive lẫn local ---
     : "${CODE_SWITCHING_DIR:=${QA_DATASETS_DIR}/benchmark_qa/speech/trich_xuat_thong_tin/code_switching}"
     : "${KNOWLEDGE_DIR:=${QA_DATASETS_DIR}/benchmark_qa/knowledge}"
+    # Log sample lỗi (local-only, gitignore) -- dùng cho --rerun-mode failed.
+    : "${LOG_DIR:=${QA_DATASETS_DIR}/logs/benchmark_qa}"
 
-    # Export để env_paths.py (chạy trong process con) đọc được cùng override.
-    export QA_DATASETS_DIR CODE_SWITCHING_DIR KNOWLEDGE_DIR ENV_FILE
+    # Export để env_paths.py / error_log.py (chạy trong process con) đọc được cùng override.
+    export QA_DATASETS_DIR CODE_SWITCHING_DIR KNOWLEDGE_DIR ENV_FILE BENCHMARK_QA_LOG_DIR="${LOG_DIR}"
 
     # --- Sound ---
     CLOTHO_AQA_DIR="${QA_DATASETS_DIR}/sound_datasets/clotho_aqa"
@@ -147,6 +150,7 @@ resolve_paths() {
     TU_LAY_FINAL_DIR="${BENCHMARK_QA_SPEECH_DIR}/tu_lay"
 
     # --- Code-switching: output của 2 lượt lọc (filter-questions) + file final ---
+    CS_CLASSIFIED="${CODE_SWITCHING_DIR}/code_switching_classified.jsonl"
     CS_MULTIHOP="${CODE_SWITCHING_DIR}/code_switching_multihop_qa.jsonl"
     CS_GEMINI_KEPT="${CODE_SWITCHING_DIR}/code_switching_gemini_kept.jsonl"
     CS_OPENAI_KEPT="${CODE_SWITCHING_DIR}/code_switching_openai_kept.jsonl"
@@ -162,8 +166,38 @@ ensure_output_dirs() {
         "${HAN_VIET_OUT_DIR}" "${PHUONG_NGU_OUT_DIR}" \
         "${TU_MUON_FINAL_DIR}" "${TU_LAY_FINAL_DIR}" \
         "${TU_MUON_INPUT_DIR}" "${TU_LAY_INPUT_DIR}" \
-        "${CODE_SWITCHING_DIR}" \
+        "${CODE_SWITCHING_DIR}" "${LOG_DIR}" \
         "${CLOTHO_AQA_DIR}" "${SOUND_OUT_DIR}" "${VIETNAMESE_SPEECH_QA_LOCAL_DIR}"
+}
+
+# Đường dẫn file extended-final từ file final tương ứng.
+extended_final_path() {
+    local final="$1"
+    printf '%s_extended.jsonl' "${final%.jsonl}"
+}
+
+# Gọi extend-final: join file final với (các) file nguồn để thêm field debug.
+# Dùng: extend_final TASK FINAL (các cặp "--join-arg" "spec")
+extend_final() {
+    local task="$1" final="$2"; shift 2
+    [[ -f "$final" ]] || { warn "bỏ qua extend-final (không có $final)"; return 0; }
+    local out
+    out="$(extended_final_path "$final")"
+    py "$MAIN_PY" extend-final --final "$final" --output "$out" "$@"
+}
+
+# Chuẩn bị cho --rerun-mode: build danh sách id lỗi (failed) hoặc xoá log cũ (fresh).
+ONLY_IDS_ARGS=()
+prepare_rerun() {
+    local task="$1"
+    ONLY_IDS_ARGS=()
+    if [[ "${RERUN_MODE}" == "failed" ]]; then
+        local ids_file="${LOG_DIR}/${task}/only_ids.json"
+        py "$MAIN_PY" failed-ids --task "$task" --output "$ids_file"
+        ONLY_IDS_ARGS=(--only-ids "$ids_file")
+    else
+        run rm -f "${LOG_DIR}/${task}/failures.jsonl"
+    fi
 }
 
 # Từ 1 file pre-final -> các đường dẫn của bước lọc 2 API + file final.

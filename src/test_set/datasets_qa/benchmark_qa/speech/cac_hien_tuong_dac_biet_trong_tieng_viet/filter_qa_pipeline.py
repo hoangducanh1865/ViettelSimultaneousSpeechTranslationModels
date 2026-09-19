@@ -34,6 +34,7 @@ sys.path.insert(0, str(_THIS_DIR))  # auto_model_relay.py, env_paths.py cùng th
 
 import auto_model_relay  # noqa: E402
 import env_paths  # noqa: E402
+import error_log  # noqa: E402
 
 DEFAULT_BATCH_SIZE = 15
 DEFAULT_MAX_WORKERS = 4
@@ -204,7 +205,7 @@ def make_provider_call(provider: str, client, model: str):
 
 
 def _filter_batch(provider_call, batch: list[dict], system_prompt: str, context_fields: list[str],
-                  max_retries: int):
+                  max_retries: int, task: str = ""):
     payload = [build_payload_item(r, context_fields) for r in batch]
     ids_sent = {r["id"] for r in batch}
     last_error = None
@@ -223,18 +224,19 @@ def _filter_batch(provider_call, batch: list[dict], system_prompt: str, context_
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI lọc câu hỏi] batch {len(batch)} câu: {last_error!r} -- GIỮ LẠI toàn bộ batch (mặc định an toàn).")
+    error_log.log_failures(task, "filter-qa", ids_sent, last_error)
     return {r["id"]: {"keep": True, "reason": "Lỗi gọi API, mặc định giữ lại."} for r in batch}, ""
 
 
 def filter_questions(provider_call, records: list[dict], kept_output: Path, rules_output: Path,
                      *, system_prompt: str, context_fields: list[str],
                      batch_size: int = DEFAULT_BATCH_SIZE, max_workers: int = DEFAULT_MAX_WORKERS,
-                     max_retries: int = DEFAULT_MAX_RETRIES) -> None:
+                     max_retries: int = DEFAULT_MAX_RETRIES, task: str = "") -> None:
     batches = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
     all_items: dict = {}
     all_summaries: list[str] = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_filter_batch, provider_call, b, system_prompt, context_fields, max_retries): b
+        futures = {executor.submit(_filter_batch, provider_call, b, system_prompt, context_fields, max_retries, task): b
                    for b in batches}
         for future in tqdm(as_completed(futures), total=len(futures), desc="lọc câu hỏi"):
             items, summary = future.result()
@@ -307,6 +309,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ lọc lại các sample này (rerun-mode failed).")
 
     args = parser.parse_args(argv)
 
@@ -335,10 +338,15 @@ def main(argv: Optional[list[str]] = None) -> None:
         system_prompt = build_filter_system_prompt(args.task)
         context_fields = CONTEXT_FIELDS[args.task]
         records = _load_jsonl(input_path)
+        if args.only_ids:
+            only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            records = [r for r in records if str(r["id"]).split("__")[0] in only]
+            print(f"[rerun] chỉ lọc lại {len(records)} câu lỗi.")
         print(f"[{args.task}/{args.provider}:{model}] Đọc {len(records)} câu từ {input_path}")
 
         filter_questions(
             provider_call, records, Path(args.kept_output), Path(args.rules_output),
             system_prompt=system_prompt, context_fields=context_fields,
             batch_size=args.batch_size, max_workers=args.max_workers, max_retries=args.max_retries,
+            task=args.task,
         )

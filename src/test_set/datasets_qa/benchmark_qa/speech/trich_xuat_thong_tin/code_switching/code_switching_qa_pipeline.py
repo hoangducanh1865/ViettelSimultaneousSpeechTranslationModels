@@ -61,8 +61,11 @@ sys.path.insert(0, str(_THIS_DIR.parents[3]))  # datasets_qa/, cho translate_dat
 
 import auto_model_relay  # noqa: E402 -- dùng chung call_model()/resolve_clients() cho auto-detect Colab/local
 import env_paths  # noqa: E402
+import error_log  # noqa: E402
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index  # noqa: E402
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL  # noqa: E402
+
+TASK_NAME = "code_switching"
 
 DEFAULT_BATCH_SIZE = 15
 DEFAULT_GEN_BATCH_SIZE = 15
@@ -152,6 +155,7 @@ def _classify_cs_fallback_batch(client, model, batch, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI classify-cs fallback] batch {len(batch)} mục: {last_error!r} -- dùng field rỗng.")
+    error_log.log_failures(TASK_NAME, "classify-cs", [item["id"] for item in batch], last_error, model=model)
     return {item["id"]: {k: None for k in FIELD_KEYS} for item in batch}
 
 
@@ -396,6 +400,7 @@ def _gen_qual_batch(client, model, system_prompt, batch, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI sinh câu hỏi] batch {len(batch)} mục: {last_error!r} -- bỏ qua batch.")
+    error_log.log_failures(TASK_NAME, "generate-questions", ids_sent, last_error, model=model)
     return {}
 
 
@@ -499,6 +504,7 @@ def _filter_batch(client_or_provider_call, batch, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI lọc câu hỏi] batch {len(batch)} câu: {last_error!r} -- GIỮ LẠI toàn bộ batch (mặc định an toàn).")
+    error_log.log_failures(TASK_NAME, "filter-questions", [r["id"] for r in batch], last_error)
     return {r["id"]: {"keep": True, "reason": "Lỗi gọi API, mặc định giữ lại."} for r in batch}, ""
 
 
@@ -591,6 +597,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p1.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
 
     p2 = sub.add_parser("generate-questions", help="Sinh câu hỏi 6 loại (A-F) từ output classify-cs.")
     env_paths.add_location_arg(p2)
@@ -603,6 +610,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p2.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
     p2.add_argument("--seed", type=int, default=42)
 
     p3 = sub.add_parser("filter-questions", help="Lọc chất lượng câu hỏi (dùng chung Gemini/OpenAI).")
@@ -620,6 +628,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p3.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p3.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p3.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p3.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
 
     args = parser.parse_args(argv)
 
@@ -635,6 +644,9 @@ def main(argv: Optional[list[str]] = None) -> None:
 
         client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path, args.location)
         records = _load_jsonl(input_path)
+        if getattr(args, "only_ids", None):
+            _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            records = [r for r in records if str(r["id"]).split("__")[0] in _only]
         kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         out = classify_cs(
             client, model, records, kg,
@@ -658,6 +670,9 @@ def main(argv: Optional[list[str]] = None) -> None:
 
         client, model = _resolve_role_client(service_account_json, env_file, args.model, "GEMINI", input_path, args.location)
         records = _load_jsonl(input_path)
+        if getattr(args, "only_ids", None):
+            _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            records = [r for r in records if str(r["id"]).split("__")[0] in _only]
         kg = load_knowledge_graph(Path(knowledge_json)) if Path(knowledge_json).exists() else None
         generate_questions(
             client, model, records, output, knowledge_graph=kg,
@@ -674,6 +689,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         env_file = args.env_file or (str(env_paths.default_env_file(args.location)) if args.location == "local" else None)
 
         records = _load_jsonl(input_path)
+        if getattr(args, "only_ids", None):
+            _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            records = [r for r in records if str(r["id"]).split("__")[0] in _only]
         if args.provider == "gemini":
             service_account_json = args.service_account_json or (
                 str(env_paths.gemini_service_account_path(args.location)) if args.location == "drive" and not env_file else None

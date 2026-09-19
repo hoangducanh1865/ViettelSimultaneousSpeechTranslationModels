@@ -47,8 +47,11 @@ sys.path.insert(0, str(_THIS_DIR.parents[3]))
 
 import auto_model_relay
 import env_paths
+import error_log
 from knowledge_graph import load_knowledge_graph, rule_addendum_text, words_index
 from test_set.datasets_qa.translate_datasets.translate_dataset import DEFAULT_MODEL, load_gemini_client
+
+TASK_NAME = "phuong_ngu"
 
 DEFAULT_BATCH_SIZE = 20
 DEFAULT_GEN_BATCH_SIZE = 15
@@ -118,6 +121,7 @@ def _classify_region_batch(client, model, batch, max_retries):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI phân loại vùng/dân tộc] batch {len(batch)} sample: {last_error!r} -- mặc định identified=false.")
+    error_log.log_failures(TASK_NAME, "classify-region", ids_sent, last_error)
     return {r["id"]: {"identified": False, "region_or_ethnic_group": None, "reason": "Lỗi gọi API."} for r in batch}
 
 
@@ -235,6 +239,7 @@ def _gen_region_qa_batch(client, model, batch, max_retries, system_prompt):
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     tqdm.write(f"[LỖI sinh câu hỏi vùng/dân tộc] batch {len(batch)} sample: {last_error!r} -- bỏ qua.")
+    error_log.log_failures(TASK_NAME, "generate-questions", ids_sent, last_error)
     return {}
 
 
@@ -322,6 +327,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p1.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     p1.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p1.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p1.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
 
     p2 = sub.add_parser("generate-questions", help="Sinh câu hỏi vùng/dân tộc cho sample đã xác định.")
     env_paths.add_location_arg(p2)
@@ -335,6 +341,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     p2.add_argument("--batch-size", type=int, default=DEFAULT_GEN_BATCH_SIZE)
     p2.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS)
     p2.add_argument("--max-retries", type=int, default=DEFAULT_MAX_RETRIES)
+    p2.add_argument("--only-ids", default=None, help="JSON list base id -- chỉ chạy lại sample lỗi.")
 
     args = parser.parse_args(argv)
 
@@ -344,6 +351,9 @@ def main(argv: Optional[list[str]] = None) -> None:
             location=args.location, model=args.model, base_url=args.gemini_base_url,
         )
         records = _load_jsonl(Path(args.input))
+        if getattr(args, "only_ids", None):
+            _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            records = [r for r in records if str(r["id"]).split("__")[0] in _only]
         n_ambiguous = sum(1 for r in records if r.get("_ambiguous_match_count"))
         n_no_transcript = sum(1 for r in records if r.get("transcript") is None)
         print(f"Đã đọc {len(records)} sample. {n_ambiguous} sample có transcript ghép MẬP MỜ, "
@@ -360,6 +370,9 @@ def main(argv: Optional[list[str]] = None) -> None:
             location=args.location, model=args.model, base_url=args.gemini_base_url,
         )
         region_records = _load_jsonl(Path(args.input))
+        if getattr(args, "only_ids", None):
+            _only = {str(i).split("__")[0] for i in json.load(open(args.only_ids, encoding="utf-8"))}
+            region_records = [r for r in region_records if str(r["id"]).split("__")[0] in _only]
         knowledge_graph = load_knowledge_graph(Path(args.knowledge_json)) if args.knowledge_json else None
         generate_questions(
             client, model, region_records, Path(args.output), knowledge_graph=knowledge_graph,

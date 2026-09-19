@@ -364,6 +364,15 @@ RUN_REAL_API=1 PYTHONPATH=src python -m pytest tests/benchmark_qa -q
   `.env` chỉ cần chứa **API key** (`GEMINI_API_KEY` / `OPENAI_API_KEY`); override qua
   `--gemini-model/--openai-model/--*-base-url` nếu cần. Cả 4 task lẫn code-switching/filter đều
   resolve credential qua `auto_model_relay.resolve_role_client()` (Vertex service account nếu có).
+- **Extended-final** (`tools/extend_final.py`, chạy tự động sau `finalize` cho cả 5 task): mỗi file
+  `*_final.jsonl` có thêm bản `*_final_extended.jsonl` join kèm field debug (`transcript`,
+  `question_type`, `difficulty`, `level`/`max_level`, `target_word`/`target_terms`...).
+  Ví dụ code-switching: `code_switching_openai_kept_final_extended.jsonl`.
+- **Log sample lỗi + 2 chế độ rerun**: mọi sample lỗi ở bước API được ghi vào
+  `data/logs/benchmark_qa/<task>/failures.jsonl` (đã gitignore, chỉ local). Chạy lại:
+  `--rerun-mode fresh` (mặc định: xoá log + output, chạy mới) hoặc `--rerun-mode failed`
+  (chỉ chạy lại sample lỗi: debate dùng `--only-ids`; generate resumable tự retry phần thiếu;
+  lọc chạy lại để chấm lại). Ví dụ: `bash run/benchmark_qa.sh code-switching --location local --rerun-mode failed`.
 - **Fallback model dạng vòng tròn** (`auto_model_relay.call_model`): khi 1 model lỗi (vd hết quota
   429), tự nhảy sang model khác **cùng họ** trong pool. Pool theo giai đoạn: debate rẻ
   (`DEBATE_*_MODELS`) / lọc cuối khoẻ (`FILTER_*_MODELS`); danh sách nằm trong
